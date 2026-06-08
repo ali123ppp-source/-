@@ -7,6 +7,7 @@ from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.shared import Cm, Pt, RGBColor
 from docx.oxml import parse_xml, OxmlElement
 from docx.oxml.ns import nsdecls, qn
+import re
 
 # إعدادات واجهة المستخدم
 st.set_page_config(page_title="نظام تنسيق وتدقيق كشوفات الوكلاء", layout="wide")
@@ -31,7 +32,6 @@ if "processing_done" not in st.session_state:
 def set_table_borders(table, color_hex="2A4B7C"):
     """تعديل لون خطوط (حدود) الجدول بالكامل إلى أزرق هادئ وجميل"""
     tblPr = table._tbl.tblPr
-    # sz="6" تعني سمك الخط، وقمنا بتلوين الحدود الخارجية والداخلية (الأفقية والعمودية)
     borders = parse_xml(f'''
         <w:tblBorders {nsdecls("w")}>
             <w:top w:val="single" w:sz="6" w:space="0" w:color="{color_hex}"/>
@@ -66,10 +66,10 @@ def format_cell_advanced(cell, text, bold=False, color_rgb=None, size_pt=16, fon
     cell.text = str(text)
     p = cell.paragraphs[0]
     
-    if align == "center":
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    elif align == "right":
+    if align == "right":
         p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    else:
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         
     pPr = p.paragraph_format.element.get_or_add_pPr()
     pPr.append(parse_xml(f'<w:bidi {nsdecls("w")}/>'))
@@ -142,17 +142,27 @@ def extract_and_clean_data(file_obj):
 def build_professional_word_report(df, filename_base):
     doc = Document()
     
-    # حدود الصفحة تكون اقل ما يمكن
+    # 3- تقليل الهوامش من اليمين واليسار لاستغلال المساحة القصوى
     for section in doc.sections:
         section.top_margin = Cm(0.5)
         section.bottom_margin = Cm(0.5)
-        section.left_margin = Cm(0.5)
-        section.right_margin = Cm(0.5)
+        section.left_margin = Cm(0.3)   # تقليل الهامش الأيسر
+        section.right_margin = Cm(0.3)  # تقليل الهامش الأيمن
         
-    # إضافة أعلى الصفحة الأولى اسم الملف
+    # 2- تجريد اسم الملف من الكلمات المحددة والإبقاء على الاسم الثلاثي للوكيل فقط
+    clean_name = filename_base
+    words_to_remove = ["مستكشف", "معدل", "كشف", "منسق", "جاهز"]
+    for w in words_to_remove:
+        clean_name = clean_name.replace(w, "")
+    # حذف أي حروف أو كلمات إنجليزية أو رموز
+    clean_name = re.sub(r'[a-zA-Z]', '', clean_name)
+    clean_name = re.sub(r'[\-_+_.]', '', clean_name)
+    clean_name = " ".join(clean_name.split()) # تنظيف المسافات الزائدة
+    
+    # إضافة أعلى الصفحة الأولى اسم الوكيل المجرّد
     title_p = doc.add_paragraph()
     title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    title_run = title_p.add_run(f"الكشف الإحصائي المنسق لملف: {filename_base}")
+    title_run = title_p.add_run(f"الكشف الإحصائي المنسق للوكيل: {clean_name}")
     title_run.font.name = "Segoe UI Semibold"
     title_run.font.size = Pt(14)
     title_run.bold = True
@@ -175,7 +185,6 @@ def build_professional_word_report(df, filename_base):
     table.style = 'Table Grid'
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     
-    # ⭐ [التعديل الجديد]: تطبيق تلوين خطوط الجدول باللون الأزرق الجميل الهادئ
     set_table_borders(table, color_hex="2A4B7C")
     
     # قلب وتوجيه الجدول من اليمين إلى اليسار
@@ -190,6 +199,7 @@ def build_professional_word_report(df, filename_base):
     max_name_len = max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15)
     dynamic_name_width = Cm(max_name_len * 0.22 + 0.5)
     
+    # 3- تكبير حقل الملاحظات بمقدار ربع سم إضافي (من 1.5 إلى 1.75)
     col_widths = [
         Cm(0.9),              # ت
         dynamic_name_width,   # اسم رب الأسرة
@@ -198,8 +208,11 @@ def build_professional_word_report(df, filename_base):
         Cm(0.9),              # الكلي
         Cm(0.9),              # محجوب
         Cm(0.9),              # مستحق
-        Cm(1.5)               # ملاحظات
+        Cm(1.75)              # ملاحظات (تمت زيادته ربع سم)
     ]
+    
+    # 5- إعداد اللون الأزرق الداكن لخط العناوين (Navy Blue)
+    COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
     
     # تنسيق صف العناوين الرئيسي
     hdr_cells = table.rows[0].cells
@@ -208,9 +221,12 @@ def build_professional_word_report(df, filename_base):
         
         if i in [4, 5, 6]:
             set_cell_vertical_text(hdr_cells[i])
-            format_cell_advanced(hdr_cells[i], title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="center")
+            # 5- تطبيق اللون الأزرق الداكن
+            format_cell_advanced(hdr_cells[i], title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="center", color_rgb=COLOR_NAVY_BLUE)
         else:
-            format_cell_advanced(hdr_cells[i], title, bold=True, size_pt=14, font_name="Segoe UI Semibold", align="center" if i != 1 else "right")
+            # 5- تطبيق اللون الأزرق الداكن والاتجاه الصحيح لـ "اسم رب الأسرة" (right) بقية العناوين (center)
+            cell_align = "right" if i == 1 else "center"
+            format_cell_advanced(hdr_cells[i], title, bold=True, size_pt=14, font_name="Segoe UI Semibold", align=cell_align, color_rgb=COLOR_NAVY_BLUE)
             
     # ألوان الخلفيات المطلوبة
     HEX_ELEGANT_BLUE = "D4E6F1"
@@ -238,11 +254,12 @@ def build_professional_word_report(df, filename_base):
             val = ""
             text_color = None
             cell_align = "center"
+            font_size = 16  # الحجم الافتراضي للحقول
             
             if i == 0: val = row["ت"]
             elif i == 1: 
                 val = row["اسم رب الأسرة"]
-                cell_align = "right"
+                cell_align = "right"  # 1- إجبار نص الأسماء ليكون محاذاً لليمين (Right) دائماً وبشكل قطعي
             elif i == 2: val = "x" if is_total_zero else ""
             elif i == 3: val = row["رقم البطاقة القديم"]
             elif i == 4: val = row["الكلي"]
@@ -252,8 +269,9 @@ def build_professional_word_report(df, filename_base):
                 val = "محجوب" if is_total_zero else ""
                 if is_total_zero:
                     text_color = RGBColor(203, 67, 53)
+                    font_size = 11  # 4- جعل كلمة محجوب داخل حقل الملاحظات بحجم 11 حصراً
                     
-            format_cell_advanced(row_cells[i], val, size_pt=16, font_name="Calibri", color_rgb=text_color, align=cell_align)
+            format_cell_advanced(row_cells[i], val, size_pt=font_size, font_name="Calibri", color_rgb=text_color, align=cell_align)
             
             if is_total_zero:
                 set_cell_background(row_cells[i], HEX_ALERT_RED)
@@ -272,7 +290,7 @@ def build_professional_word_report(df, filename_base):
 # واجهة استخدام التطبيق (Streamlit Interface)
 # -----------------------------------------------------------------------------
 st.markdown("<h3 style='text-align: right;'>📂 رفع الكشف المراد تدقيقه وتنسيقه للمطبعة</h3>", unsafe_allow_html=True)
-uploaded_file = st.file_uploader("ارفع كشف الوكلاء", type=['docx'], key="doc_input_v3", label_visibility="collapsed")
+uploaded_file = st.file_uploader("ارفع كشف الوكلاء", type=['docx'], key="doc_input_v4", label_visibility="collapsed")
 
 st.markdown("<br>", unsafe_allow_html=True)
 
