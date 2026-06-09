@@ -265,7 +265,7 @@ def build_professional_word_report(df, filename_base):
                 val = "محجوب" if is_eligible_zero else "" 
                 if is_eligible_zero:
                     text_color = RGBColor(203, 67, 53)
-                    font_size = 10
+                    font_size = 12
                     
             format_cell_advanced(row_cells[i], val, size_pt=font_size, font_name="Calibri", color_rgb=text_color, align=cell_align)
             
