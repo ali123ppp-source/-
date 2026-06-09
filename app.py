@@ -66,7 +66,6 @@ def format_cell_advanced(cell, text, bold=False, color_rgb=None, size_pt=16, fon
     cell.text = str(text)
     p = cell.paragraphs[0]
     
-    # دعم الاتجاهات الثلاثة لتفادي مشاكل الـ bidiVisual
     if align == "right":
         p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     elif align == "left":
@@ -152,7 +151,7 @@ def build_professional_word_report(df, filename_base):
         section.left_margin = Cm(0.3)
         section.right_margin = Cm(0.3)
         
-    # تجريد اسم الملف من الكلمات المحددة والإبقاء على الاسم الثلاثي للوكيل فقط
+    # تجريد اسم الملف والإبقاء على الاسم الثلاثي للوكيل فقط
     clean_name = filename_base
     words_to_remove = ["مستكشف", "معدل", "كشف", "منسق", "جاهز"]
     for w in words_to_remove:
@@ -179,7 +178,8 @@ def build_professional_word_report(df, filename_base):
     fldChar3 = parse_xml(f'<w:fldChar {nsdecls("w")} w:fldCharType="end"/>')
     f_run._r.extend([fldChar1, instrText, fldChar2, fldChar3])
     
-    headers = ["ت", "اسم رب الأسرة", "حقل فارغ", "رقم البطاقة القديم", "الكلي", "محجوب", "مستحق", "ملاحظات"]
+    # ⭐ [التعديل 2]: تغيير ترتيب الحقول بعد الحقل الفارغ مباشرة بناءً على طلبك
+    headers = ["ت", "اسم رب الأسرة", "حقل فارغ", "الكلي", "مستحق", "محجوب", "رقم البطاقة القديم", "ملاحظات"]
     
     table = doc.add_table(rows=1, cols=8)
     table.style = 'Table Grid'
@@ -196,14 +196,15 @@ def build_professional_word_report(df, filename_base):
     max_name_len = max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15)
     dynamic_name_width = Cm(max_name_len * 0.22 + 0.5)
     
+    # ⭐ [التعديل 2]: إعادة توطين مقاسات الأعمدة لتتوافق مع الترتيب الجديد بدقة
     col_widths = [
         Cm(0.9),              # ت
         dynamic_name_width,   # اسم رب الأسرة
         Cm(0.35),             # حقل فارغ
-        Cm(3.0),              # رقم البطاقة القديم
         Cm(0.9),              # الكلي
-        Cm(0.9),              # محجوب
         Cm(0.9),              # مستحق
+        Cm(0.9),              # محجوب
+        Cm(3.0),              # رقم البطاقة القديم
         Cm(1.75)              # ملاحظات
     ]
     
@@ -214,11 +215,11 @@ def build_professional_word_report(df, filename_base):
     for i, title in enumerate(headers):
         hdr_cells[i].width = col_widths[i]
         
-        if i in [4, 5, 6]:
+        # حقول الأرقام الثلاثة أصبحت الآن في المؤشرات (3، 4، 5)
+        if i in [3, 4, 5]:
             set_cell_vertical_text(hdr_cells[i])
             format_cell_advanced(hdr_cells[i], title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="center", color_rgb=COLOR_NAVY_BLUE)
         else:
-            # تعديل محاذاة عنوان حقل الأسماء ليتناسق بصرياً مع البيانات (left تعني يمين بصرياً)
             cell_align = "left" if i == 1 else "center"
             format_cell_advanced(hdr_cells[i], title, bold=True, size_pt=14, font_name="Segoe UI Semibold", align=cell_align, color_rgb=COLOR_NAVY_BLUE)
             
@@ -236,7 +237,6 @@ def build_professional_word_report(df, filename_base):
         r_trPr = table.rows[idx+1]._tr.get_or_add_trPr()
         r_trPr.append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
         
-        # ⭐ [التعديل الجديد]: الشرط الآن يفحص "حقل الأفراد المستحقة" إذا كان صفراً وليس الكلي
         is_eligible_zero = int(row["مستحق"]) == 0
         
         for i in range(8):
@@ -253,30 +253,50 @@ def build_professional_word_report(df, filename_base):
             if i == 0: val = row["ت"]
             elif i == 1: 
                 val = row["اسم رب الأسرة"]
-                # ⭐ [التعديل الجديد]: جعل المحاذاة "left" برمجياً لتظهر "يمين" بصرياً في الوورد
-                # وبذلك يلتصق النص بجهة الرقم تماماً، ويترك الفراغ المتبقي جهة الحقل الفارغ
                 cell_align = "left" 
-            elif i == 2: val = "x" if is_eligible_zero else "" # يعتمد على المستحق
-            elif i == 3: val = row["رقم البطاقة القديم"]
-            elif i == 4: val = row["الكلي"]
-            elif i == 5: val = row["محجوب"]
-            elif i == 6: val = row["مستحق"]
+            elif i == 2: val = "x" if is_eligible_zero else "" 
+            elif i == 3: val = row["الكلي"]
+            elif i == 4: val = row["مستحق"]
+            elif i == 5: 
+                val = row["محجوب"]
+                font_size = 11  # ⭐ [التعديل 1]: جعل حجم الأرقام/الكلمات في حقل محجوب بحجم 11 دائماً
+            elif i == 6: val = row["رقم البطاقة القديم"]
             elif i == 7: 
-                val = "محجوب" if is_eligible_zero else "" # يعتمد على المستحق
+                val = "محجوب" if is_eligible_zero else "" 
                 if is_eligible_zero:
                     text_color = RGBColor(203, 67, 53)
                     font_size = 11
                     
             format_cell_advanced(row_cells[i], val, size_pt=font_size, font_name="Calibri", color_rgb=text_color, align=cell_align)
             
-            # تطبيق تلوين الحجب بناءً على صفر أفراد مستحقة
             if is_eligible_zero:
                 set_cell_background(row_cells[i], HEX_ALERT_RED)
             else:
                 if i == 0: set_cell_background(row_cells[i], HEX_ELEGANT_BLUE)
-                elif i == 4: set_cell_background(row_cells[i], HEX_LIGHT_BLUE)
-                elif i == 5: set_cell_background(row_cells[i], HEX_LIGHT_RED)
-                elif i == 6: set_cell_background(row_cells[i], HEX_LIGHT_GREEN)
+                elif i == 3: set_cell_background(row_cells[i], HEX_LIGHT_BLUE)   # الكلي (الموقع الجديد)
+                elif i == 4: set_cell_background(row_cells[i], HEX_LIGHT_GREEN)  # مستحق (الموقع الجديد)
+                elif i == 5: set_cell_background(row_cells[i], HEX_LIGHT_RED)    # محجوب (الموقع الجديد)
+
+    # ⭐ [التعديل 3]: محرك الإحصاء والمجموع الكلي ووضعه بشكل رسمي ومنظم تحت الجدول
+    total_all = df["الكلي"].astype(int).sum()
+    total_eligible = df["مستحق"].astype(int).sum()
+    total_withheld = df["محجوب"].astype(int).sum()
+    
+    doc.add_paragraph()  # سطر فارغ للفصل بصرياً بعد الجدول
+    stats_p = doc.add_paragraph()
+    stats_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    stats_p.paragraph_format.element.get_or_add_pPr().append(parse_xml(f'<w:bidi {nsdecls("w")}/>'))
+    
+    stats_text = (
+        f"العدد الكلي للافراد = {total_all}\n"
+        f"العدد الكلي للمستحقين = {total_eligible}\n"
+        f"العدد الكلي للمحجوبين = {total_withheld}"
+    )
+    stats_run = stats_p.add_run(stats_text)
+    stats_run.font.name = "Segoe UI Semibold"
+    stats_run.font.size = Pt(13)
+    stats_run.bold = True
+    stats_run.font.color.rgb = COLOR_NAVY_BLUE
 
     buffer = BytesIO()
     doc.save(buffer)
@@ -287,7 +307,7 @@ def build_professional_word_report(df, filename_base):
 # واجهة استخدام التطبيق (Streamlit Interface)
 # -----------------------------------------------------------------------------
 st.markdown("<h3 style='text-align: right;'>📂 رفع الكشف المراد تدقيقه وتنسيقه للمطبعة</h3>", unsafe_allow_html=True)
-uploaded_file = st.file_uploader("ارفع كشف الوكلاء", type=['docx'], key="doc_input_v5", label_visibility="collapsed")
+uploaded_file = st.file_uploader("ارفع كشف الوكلاء", type=['docx'], key="doc_input_v6", label_visibility="collapsed")
 
 st.markdown("<br>", unsafe_allow_html=True)
 
