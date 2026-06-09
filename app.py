@@ -259,13 +259,13 @@ def build_professional_word_report(df, filename_base):
             elif i == 4: val = row["مستحق"]
             elif i == 5: 
                 val = row["محجوب"]
-                font_size = 11  # ⭐ [التعديل 1]: جعل حجم الأرقام/الكلمات في حقل محجوب بحجم 11 دائماً
+                font_size = 10  # ⭐ [التعديل 1]: جعل حجم الأرقام/الكلمات في حقل محجوب بحجم 11 دائماً
             elif i == 6: val = row["رقم البطاقة القديم"]
             elif i == 7: 
                 val = "محجوب" if is_eligible_zero else "" 
                 if is_eligible_zero:
                     text_color = RGBColor(203, 67, 53)
-                    font_size = 11
+                    font_size = 10
                     
             format_cell_advanced(row_cells[i], val, size_pt=font_size, font_name="Calibri", color_rgb=text_color, align=cell_align)
             
