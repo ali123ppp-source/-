@@ -4,6 +4,7 @@ from io import BytesIO
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT
+from docx.enum.section import WD_SECTION_START
 from docx.shared import Cm, Pt, RGBColor
 from docx.oxml import parse_xml, OxmlElement
 from docx.oxml.ns import nsdecls, qn
@@ -90,6 +91,30 @@ def format_cell_advanced(cell, text, bold=False, color_rgb=None, size_pt=16, fon
         rPr.append(rFonts)
         run.font.size = Pt(size_pt)
 
+def format_cell_with_auto_number(cell, seq_name="MainSeq", current_val=1, size_pt=16, font_name="Calibri"):
+    """توليد حقل ترقيم تلقائي رسمي من نظام Microsoft Word (يتحدث تلقائياً عند التعديل)"""
+    cell.text = ""
+    p = cell.paragraphs[0]
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    pPr = p.paragraph_format.element.get_or_add_pPr()
+    pPr.append(parse_xml(f'<w:bidi {nsdecls("w")}/>'))
+    
+    # بناء هيكلية حقل SEQ الخاص بالترقيم الديناميكي لوورد مع نص افتراضي فوري المعاينة
+    fld_xml = f'''
+        <w:fldSimple {nsdecls("w")} w:instr="SEQ {seq_name} \\* ARABIC">
+            <w:r>
+                <w:rPr>
+                    <w:rFonts w:ascii="{font_name}" w:hAnsi="{font_name}" w:cs="{font_name}"/>
+                    <w:sz w:val="{int(size_pt * 2)}"/>
+                    <w:szCs w:val="{int(size_pt * 2)}"/>
+                    <w:b/>
+                </w:rPr>
+                <w:t>{str(current_val)}</w:t>
+            </w:r>
+        </w:fldSimple>
+    '''
+    p._p.append(parse_xml(fld_xml))
+
 # -----------------------------------------------------------------------------
 # محرك قراءة وتنظيف البيانات
 # -----------------------------------------------------------------------------
@@ -147,14 +172,13 @@ def extract_and_clean_data(file_obj):
 def build_professional_word_report(df, filename_base, report_mode, selected_card_type):
     doc = Document()
     
-    # تقليل الهوامش من اليمين واليسار لاستغلال المساحة القصوى
+    # ضبط الهوامش الضيقة لاستغلال كامل ورق الطباعة
     for section in doc.sections:
         section.top_margin = Cm(0.5)
         section.bottom_margin = Cm(0.5)
         section.left_margin = Cm(0.3)
         section.right_margin = Cm(0.3)
         
-    # تجريد اسم الملف والإبقاء على الاسم الثلاثي للوكيل فقط
     clean_name = filename_base
     words_to_remove = ["مستكشف", "معدل", "كشف", "منسق", "جاهز"]
     for w in words_to_remove:
@@ -165,7 +189,7 @@ def build_professional_word_report(df, filename_base, report_mode, selected_card
     
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
     
-    # تذييل الصفحة الموحد رقم الصفحة
+    # إعداد تذييل رقم الصفحة لبرنامج Word
     footer = doc.sections[0].footer
     footer_p = footer.paragraphs[0]
     footer_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -178,7 +202,7 @@ def build_professional_word_report(df, filename_base, report_mode, selected_card
     f_run._r.extend([fldChar1, instrText, fldChar2, fldChar3])
 
     # -------------------------------------------------------------------------
-    # الخيار الأول: الكشف الإحصائي الرئيسي (الأبجدي)
+    # الخيار الأول: الكشف الإحصائي الرئيسي (الترتيب الأبجدي الكامل)
     # -------------------------------------------------------------------------
     if report_mode == "الكشف الإحصائي الرئيسي المنسق":
         title_p = doc.add_paragraph()
@@ -235,7 +259,11 @@ def build_professional_word_report(df, filename_base, report_mode, selected_card
                 cell_align = "center"
                 font_size = 16
                 
-                if i == 0: val = row["ت"]
+                if i == 0: 
+                    # ⭐ ترقيم تلقائي معتمد على محرك Word
+                    format_cell_with_auto_number(row_cells[i], seq_name="MainReportSeq", current_val=idx+1, size_pt=16)
+                    set_cell_background(row_cells[i], HEX_ELEGANT_BLUE)
+                    continue
                 elif i == 1: val = row["اسم رب الأسرة"]; cell_align = "left" 
                 elif i == 2: val = "x" if is_eligible_zero else "" 
                 elif i == 3: val = row["الكلي"]
@@ -253,8 +281,7 @@ def build_professional_word_report(df, filename_base, report_mode, selected_card
                 if is_eligible_zero:
                     set_cell_background(row_cells[i], HEX_ALERT_RED)
                 else:
-                    if i == 0: set_cell_background(row_cells[i], HEX_ELEGANT_BLUE)
-                    elif i == 3: set_cell_background(row_cells[i], HEX_LIGHT_BLUE)
+                    if i == 3: set_cell_background(row_cells[i], HEX_LIGHT_BLUE)
                     elif i == 4: set_cell_background(row_cells[i], HEX_LIGHT_GREEN)
                     elif i == 5: set_cell_background(row_cells[i], HEX_LIGHT_RED)
 
@@ -275,9 +302,10 @@ def build_professional_word_report(df, filename_base, report_mode, selected_card
         stats_run.font.color.rgb = COLOR_NAVY_BLUE
 
     # -------------------------------------------------------------------------
-    # الخيار الثاني: فهرست الأسماء الأبجدي المنسق (ترتيب تنازلي عمودي بالصفحة)
+    # الخيار الثاني: فهرست الأسماء الأبجدي (ترقيم تلقائي عمودي متتابع)
     # -------------------------------------------------------------------------
     elif report_mode == "فهرست الأسماء الأبجدي المنسق":
+        # عنوان الفهرست الرئيسي يمتد على كامل عرض الصفحة
         idx_title_p = doc.add_paragraph()
         idx_title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
         idx_title_p.paragraph_format.element.get_or_add_pPr().append(parse_xml(f'<w:bidi {nsdecls("w")}/>'))
@@ -287,15 +315,22 @@ def build_professional_word_report(df, filename_base, report_mode, selected_card
         idx_title_run.bold = True
         idx_title_run.font.color.rgb = COLOR_NAVY_BLUE
         
-        idx_table = doc.add_table(rows=1, cols=6)
+        # ⭐ تقسيم الصفحة الحالية وما يليها تلقائياً لعمودين متوازيين (نظام وورد الرسمي)
+        index_section = doc.add_section(WD_SECTION_START.CONTINUOUS)
+        sectPr = index_section._sectPr
+        cols = parse_xml(f'<w:cols {nsdecls("w")} w:num="2" w:space="500"/>')
+        sectPr.append(cols)
+        
+        # إنشاء جدول يتكون من 3 حقول أساسية فقط، وسيتكفل Word بقلبه وعرض صفين متجاورين تلقائياً بالصفحة
+        idx_table = doc.add_table(rows=1, cols=3)
         idx_table.style = 'Table Grid'
         idx_table.alignment = WD_TABLE_ALIGNMENT.CENTER
         set_table_borders(idx_table, color_hex="2A4B7C")
         idx_table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
         idx_table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
         
-        idx_headers = ["ت", "اسم المواطن", "رقم البطاقة", "ت", "اسم المواطن", "رقم البطاقة"]
-        idx_widths = [Cm(0.9), Cm(4.5), Cm(3.1), Cm(0.9), Cm(4.5), Cm(3.1)]
+        idx_headers = ["ت", "اسم المواطن", "رقم البطاقة"]
+        idx_widths = [Cm(1.0), Cm(5.3), Cm(3.5)] # مجموعها 9.8سم وهو الحجم المثالي لنصف الصفحة تماماً
         
         idx_hdr_cells = idx_table.rows[0].cells
         for i, title in enumerate(idx_headers):
@@ -303,49 +338,23 @@ def build_professional_word_report(df, filename_base, report_mode, selected_card
             format_cell_advanced(idx_hdr_cells[i], title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="center", color_rgb=COLOR_NAVY_BLUE)
             set_cell_background(idx_hdr_cells[i], "D4E6F1")
             
-        # ⭐ آلية التوزيع العمودي التنازلي للصفحة الواحدة (32 اسم في العمود ليكون المجموع 64 اسم بالصفحة)
-        rows_per_page = 32
-        chunk_size = rows_per_page * 2
-        
-        for chunk_start in range(0, len(df), chunk_size):
-            chunk = df.iloc[chunk_start : chunk_start + chunk_size]
+        # إضافة كافة القيود بالتسلسل التام
+        for idx, row in df.iterrows():
+            row_cells = idx_table.add_row().cells
+            idx_table.rows[-1]._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
             
-            # تقسيم الدفعة الحالية للصفحة (الأيمن يأخذ النصف الأول عمودياً، والأيسر يأخذ النصف الثاني)
-            right_part = chunk.iloc[0 : rows_per_page]
-            left_part = chunk.iloc[rows_per_page : chunk_size]
+            for i in range(3):
+                row_cells[i].width = idx_widths[i]
+            set_cell_no_wrap(row_cells[1])
             
-            max_rows_in_chunk = max(len(right_part), len(left_part))
+            # ⭐ العمود 1: حقل ترقيم تلقائي رسمي من Word يسير تنازلياً لأسفل العمود ثم يتجه لليسار بانتظام وبلا خلل
+            format_cell_with_auto_number(row_cells[0], seq_name="IndexSeq", current_val=idx+1, size_pt=12)
             
-            for i in range(max_rows_in_chunk):
-                row_cells = idx_table.add_row().cells
-                idx_table.rows[-1]._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
-                
-                for col_idx in range(6):
-                    row_cells[col_idx].width = idx_widths[col_idx]
-                    if col_idx in [1, 4]:
-                        set_cell_no_wrap(row_cells[col_idx])
-                        
-                # تعبئة العمود الأيمن (يتحرك تنازلياً 1، 2، 3...)
-                if i < len(right_part):
-                    r_data = right_part.iloc[i]
-                    format_cell_advanced(row_cells[0], r_data["ت"], size_pt=12, font_name="Calibri", align="center")
-                    format_cell_advanced(row_cells[1], r_data["اسم رب الأسرة"], size_pt=12, font_name="Calibri", align="right")
-                    format_cell_advanced(row_cells[2], r_data[selected_card_type], size_pt=12, font_name="Calibri", align="center")
-                else:
-                    format_cell_advanced(row_cells[0], "", size_pt=12, font_name="Calibri")
-                    format_cell_advanced(row_cells[1], "", size_pt=12, font_name="Calibri")
-                    format_cell_advanced(row_cells[2], "", size_pt=12, font_name="Calibri")
-                    
-                # تعبئة العمود الأيسر (يكمل الترقيم التنازلي التابع لنفس الصفحة)
-                if i < len(left_part):
-                    l_data = left_part.iloc[i]
-                    format_cell_advanced(row_cells[3], l_data["ت"], size_pt=12, font_name="Calibri", align="center")
-                    format_cell_advanced(row_cells[4], l_data["اسم رب الأسرة"], size_pt=12, font_name="Calibri", align="right")
-                    format_cell_advanced(row_cells[5], l_data[selected_card_type], size_pt=12, font_name="Calibri", align="center")
-                else:
-                    format_cell_advanced(row_cells[3], "", size_pt=12, font_name="Calibri")
-                    format_cell_advanced(row_cells[4], "", size_pt=12, font_name="Calibri")
-                    format_cell_advanced(row_cells[5], "", size_pt=12, font_name="Calibri")
+            # العمود 2: اسم المواطن
+            format_cell_advanced(row_cells[1], row["اسم رب الأسرة"], size_pt=12, font_name="Calibri", align="right")
+            
+            # العمود 3: رقم البطاقة المختار من واجهة المستخدم
+            format_cell_advanced(row_cells[2], row[selected_card_type], size_pt=12, font_name="Calibri", align="center")
 
     buffer = BytesIO()
     doc.save(buffer)
@@ -356,11 +365,10 @@ def build_professional_word_report(df, filename_base, report_mode, selected_card
 # واجهة استخدام التطبيق (Streamlit Interface)
 # -----------------------------------------------------------------------------
 st.markdown("<h3 style='text-align: right;'>📂 رفع الكشف المراد تدقيقه وتنسيقه للمطبعة</h3>", unsafe_allow_html=True)
-uploaded_file = st.file_uploader("ارفع كشف الوكلاء", type=['docx'], key="doc_input_v7", label_visibility="collapsed")
+uploaded_file = st.file_uploader("ارفع كشف الوكلاء", type=['docx'], key="doc_input_v8", label_visibility="collapsed")
 
 st.markdown("<hr>", unsafe_allow_html=True)
 
-# ⭐ [التعديل الجديد]: لوحة التحكم المنفصلة لتحديد نوع المستند والخيارات
 st.markdown("<h4 style='text-align: right;'>🛠️ تخصيص المستند المطلوب توليده</h4>", unsafe_allow_html=True)
 
 selected_mode = st.radio(
@@ -370,7 +378,6 @@ selected_mode = st.radio(
     horizontal=True
 )
 
-# عرض خيارات رقم البطاقة فقط في حال اختيار الفهرست
 selected_card = "رقم البطاقة القديم"
 if selected_mode == "فهرست الأسماء الأبجدي المنسق":
     selected_card = st.radio(
@@ -412,7 +419,6 @@ if st.session_state.processing_done:
     with st.spinner('جاري تصدير مستند Word الاحترافي بالهيكلية المختارة...'):
         word_output = build_professional_word_report(df_final, output_filename, selected_mode, selected_card)
         
-    # تسمية الملف ديناميكياً بحسب نوع الاختيار لحفظ النظام
     file_label = "كشف_رئيسي" if selected_mode == "الكشف الإحصائي الرئيسي المنسق" else "فهرست_المطبعة"
     
     st.download_button(
