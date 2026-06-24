@@ -32,7 +32,6 @@ if "processing_done" not in st.session_state:
 # مساعدات التنسيق المتقدمة لملفات Word عبر الـ XML
 # -----------------------------------------------------------------------------
 def set_table_borders(table, color_hex="2A4B7C"):
-    """تعديل لون خطوط (حدود) الجدول بالكامل إلى أزرق هادئ وجميل"""
     tblPr = table._tbl.tblPr
     borders = parse_xml(f'''
         <w:tblBorders {nsdecls("w")}>
@@ -47,24 +46,20 @@ def set_table_borders(table, color_hex="2A4B7C"):
     tblPr.append(borders)
 
 def set_cell_background(cell, fill_hex):
-    """تلوين خلفية الخلايا"""
     shading_elm = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{fill_hex}"/>')
     cell._tc.get_or_add_tcPr().append(shading_elm)
 
 def set_cell_vertical_text(cell):
-    """قلب الكلمات لتصبح طولية (من الأسفل للأعلى داخل الخلية)"""
     tcPr = cell._tc.get_or_add_tcPr()
     text_dir = parse_xml(f'<w:textDirection {nsdecls("w")} w:val="btLr"/>')
     tcPr.append(text_dir)
 
 def set_cell_no_wrap(cell):
-    """منع نزول الاسم لسطر جديد نهائياً في الخلية الواحدة"""
     tcPr = cell._tc.get_or_add_tcPr()
     no_wrap = parse_xml(f'<w:noWrap {nsdecls("w")}/>')
     tcPr.append(no_wrap)
 
 def format_cell_advanced(cell, text, bold=False, color_rgb=None, size_pt=16, font_name="Calibri", align="center"):
-    """تنسيق متطور للنصوص العربية مع التحكم الكامل بالخط والمحاذاة والتوسيط"""
     cell.text = str(text)
     p = cell.paragraphs[0]
     
@@ -92,14 +87,12 @@ def format_cell_advanced(cell, text, bold=False, color_rgb=None, size_pt=16, fon
         run.font.size = Pt(size_pt)
 
 def format_cell_with_auto_number(cell, seq_name="MainSeq", current_val=1, size_pt=16, font_name="Calibri"):
-    """توليد حقل ترقيم تلقائي رسمي من نظام Microsoft Word (يتحدث تلقائياً عند التعديل)"""
     cell.text = ""
     p = cell.paragraphs[0]
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     pPr = p.paragraph_format.element.get_or_add_pPr()
     pPr.append(parse_xml(f'<w:bidi {nsdecls("w")}/>'))
     
-    # بناء هيكلية حقل SEQ الخاص بالترقيم الديناميكي لوورد مع نص افتراضي فوري المعاينة
     fld_xml = f'''
         <w:fldSimple {nsdecls("w")} w:instr="SEQ {seq_name} \\* ARABIC">
             <w:r>
@@ -167,12 +160,11 @@ def extract_and_clean_data(file_obj):
     return df
 
 # -----------------------------------------------------------------------------
-# محرك بناء تقرير Word الاحترافي الجديد الخاضع لخيارات المستخدم
+# محرك بناء تقرير Word
 # -----------------------------------------------------------------------------
 def build_professional_word_report(df, filename_base, report_mode, selected_card_type):
     doc = Document()
     
-    # ضبط الهوامش الضيقة لاستغلال كامل ورق الطباعة
     for section in doc.sections:
         section.top_margin = Cm(0.5)
         section.bottom_margin = Cm(0.5)
@@ -189,7 +181,6 @@ def build_professional_word_report(df, filename_base, report_mode, selected_card
     
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
     
-    # إعداد تذييل رقم الصفحة لبرنامج Word
     footer = doc.sections[0].footer
     footer_p = footer.paragraphs[0]
     footer_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -202,7 +193,7 @@ def build_professional_word_report(df, filename_base, report_mode, selected_card
     f_run._r.extend([fldChar1, instrText, fldChar2, fldChar3])
 
     # -------------------------------------------------------------------------
-    # الخيار الأول: الكشف الإحصائي الرئيسي (الترتيب الأبجدي الكامل)
+    # الخيار الأول: الكشف الإحصائي الرئيسي 
     # -------------------------------------------------------------------------
     if report_mode == "الكشف الإحصائي الرئيسي المنسق":
         title_p = doc.add_paragraph()
@@ -260,7 +251,6 @@ def build_professional_word_report(df, filename_base, report_mode, selected_card
                 font_size = 16
                 
                 if i == 0: 
-                    # ⭐ ترقيم تلقائي معتمد على محرك Word
                     format_cell_with_auto_number(row_cells[i], seq_name="MainReportSeq", current_val=idx+1, size_pt=16)
                     set_cell_background(row_cells[i], HEX_ELEGANT_BLUE)
                     continue
@@ -302,10 +292,9 @@ def build_professional_word_report(df, filename_base, report_mode, selected_card
         stats_run.font.color.rgb = COLOR_NAVY_BLUE
 
     # -------------------------------------------------------------------------
-    # الخيار الثاني: فهرست الأسماء الأبجدي (ترقيم تلقائي عمودي متتابع)
+    # الخيار الثاني: فهرست الأسماء الأبجدي (العمود الأول سيكون على اليسار)
     # -------------------------------------------------------------------------
     elif report_mode == "فهرست الأسماء الأبجدي المنسق":
-        # عنوان الفهرست الرئيسي يمتد على كامل عرض الصفحة
         idx_title_p = doc.add_paragraph()
         idx_title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
         idx_title_p.paragraph_format.element.get_or_add_pPr().append(parse_xml(f'<w:bidi {nsdecls("w")}/>'))
@@ -315,22 +304,31 @@ def build_professional_word_report(df, filename_base, report_mode, selected_card
         idx_title_run.bold = True
         idx_title_run.font.color.rgb = COLOR_NAVY_BLUE
         
-        # ⭐ تقسيم الصفحة الحالية وما يليها تلقائياً لعمودين متوازيين (نظام وورد الرسمي)
+        # ⭐ [التعديل الهام]: ضبط مسار المقطع (Section) ليبدأ من اليسار إلى اليمين
         index_section = doc.add_section(WD_SECTION_START.CONTINUOUS)
         sectPr = index_section._sectPr
-        cols = parse_xml(f'<w:cols {nsdecls("w")} w:num="2" w:space="500"/>')
+        
+        # إزالة خاصية اليمين-لليسار من المقطع حتى تبدأ الأعمدة من اليسار (العمود 1 يسار، العمود 2 يمين)
+        bidi_element = sectPr.find(qn('w:bidi'))
+        if bidi_element is not None:
+            sectPr.remove(bidi_element)
+        sectPr.append(parse_xml(f'<w:bidi {nsdecls("w")} w:val="0"/>'))
+        
+        # إضافة العمودين
+        cols = parse_xml(f'<w:cols {nsdecls("w")} w:num="2" w:space="500" w:equalWidth="1"/>')
         sectPr.append(cols)
         
-        # إنشاء جدول يتكون من 3 حقول أساسية فقط، وسيتكفل Word بقلبه وعرض صفين متجاورين تلقائياً بالصفحة
         idx_table = doc.add_table(rows=1, cols=3)
         idx_table.style = 'Table Grid'
         idx_table.alignment = WD_TABLE_ALIGNMENT.CENTER
         set_table_borders(idx_table, color_hex="2A4B7C")
+        
+        # ترك الجدول من الداخل يعمل كنظام عربي (اليمين لليسار) للترتيب الداخلي
         idx_table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
         idx_table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
         
         idx_headers = ["ت", "اسم المواطن", "رقم البطاقة"]
-        idx_widths = [Cm(1.0), Cm(5.3), Cm(3.5)] # مجموعها 9.8سم وهو الحجم المثالي لنصف الصفحة تماماً
+        idx_widths = [Cm(1.0), Cm(5.3), Cm(3.5)] 
         
         idx_hdr_cells = idx_table.rows[0].cells
         for i, title in enumerate(idx_headers):
@@ -338,7 +336,6 @@ def build_professional_word_report(df, filename_base, report_mode, selected_card
             format_cell_advanced(idx_hdr_cells[i], title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="center", color_rgb=COLOR_NAVY_BLUE)
             set_cell_background(idx_hdr_cells[i], "D4E6F1")
             
-        # إضافة كافة القيود بالتسلسل التام
         for idx, row in df.iterrows():
             row_cells = idx_table.add_row().cells
             idx_table.rows[-1]._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
@@ -347,13 +344,8 @@ def build_professional_word_report(df, filename_base, report_mode, selected_card
                 row_cells[i].width = idx_widths[i]
             set_cell_no_wrap(row_cells[1])
             
-            # ⭐ العمود 1: حقل ترقيم تلقائي رسمي من Word يسير تنازلياً لأسفل العمود ثم يتجه لليسار بانتظام وبلا خلل
             format_cell_with_auto_number(row_cells[0], seq_name="IndexSeq", current_val=idx+1, size_pt=12)
-            
-            # العمود 2: اسم المواطن
             format_cell_advanced(row_cells[1], row["اسم رب الأسرة"], size_pt=12, font_name="Calibri", align="right")
-            
-            # العمود 3: رقم البطاقة المختار من واجهة المستخدم
             format_cell_advanced(row_cells[2], row[selected_card_type], size_pt=12, font_name="Calibri", align="center")
 
     buffer = BytesIO()
@@ -365,7 +357,7 @@ def build_professional_word_report(df, filename_base, report_mode, selected_card
 # واجهة استخدام التطبيق (Streamlit Interface)
 # -----------------------------------------------------------------------------
 st.markdown("<h3 style='text-align: right;'>📂 رفع الكشف المراد تدقيقه وتنسيقه للمطبعة</h3>", unsafe_allow_html=True)
-uploaded_file = st.file_uploader("ارفع كشف الوكلاء", type=['docx'], key="doc_input_v8", label_visibility="collapsed")
+uploaded_file = st.file_uploader("ارفع كشف الوكلاء", type=['docx'], key="doc_input_v9", label_visibility="collapsed")
 
 st.markdown("<hr>", unsafe_allow_html=True)
 
