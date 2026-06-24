@@ -210,7 +210,7 @@ def build_professional_word_report(df, filename_base, report_mode, selected_card
         table.alignment = WD_TABLE_ALIGNMENT.CENTER
         set_table_borders(table, color_hex="2A4B7C")
         
-        table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
+        # تم إزالة bidiVisual ليكون الجدول من اليسار إلى اليمين
         table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
         
         max_name_len = max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15)
@@ -227,7 +227,7 @@ def build_professional_word_report(df, filename_base, report_mode, selected_card
                 set_cell_vertical_text(hdr_cells[i])
                 format_cell_advanced(hdr_cells[i], title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="center", color_rgb=COLOR_NAVY_BLUE)
             else:
-                cell_align = "left" if i == 1 else "center"
+                cell_align = "right" if i == 1 else "center"
                 format_cell_advanced(hdr_cells[i], title, bold=True, size_pt=14, font_name="Segoe UI Semibold", align=cell_align, color_rgb=COLOR_NAVY_BLUE)
                 
         HEX_ELEGANT_BLUE = "D4E6F1"
@@ -254,7 +254,7 @@ def build_professional_word_report(df, filename_base, report_mode, selected_card
                     format_cell_with_auto_number(row_cells[i], seq_name="MainReportSeq", current_val=idx+1, size_pt=16)
                     set_cell_background(row_cells[i], HEX_ELEGANT_BLUE)
                     continue
-                elif i == 1: val = row["اسم رب الأسرة"]; cell_align = "left" 
+                elif i == 1: val = row["اسم رب الأسرة"]; cell_align = "right" 
                 elif i == 2: val = "x" if is_eligible_zero else "" 
                 elif i == 3: val = row["الكلي"]
                 elif i == 4: val = row["مستحق"]
@@ -292,7 +292,8 @@ def build_professional_word_report(df, filename_base, report_mode, selected_card
         stats_run.font.color.rgb = COLOR_NAVY_BLUE
 
     # -------------------------------------------------------------------------
-    # الخيار الثاني: فهرست الأسماء الأبجدي (العمود الأول سيكون على اليسار)
+    # الخيار الثاني: فهرست الأسماء الأبجدي 
+    # (الجدول هنا يبدأ من اليسار تماماً: ت -> اسم -> بطاقة)
     # -------------------------------------------------------------------------
     elif report_mode == "فهرست الأسماء الأبجدي المنسق":
         idx_title_p = doc.add_paragraph()
@@ -304,17 +305,14 @@ def build_professional_word_report(df, filename_base, report_mode, selected_card
         idx_title_run.bold = True
         idx_title_run.font.color.rgb = COLOR_NAVY_BLUE
         
-        # ⭐ [التعديل الهام]: ضبط مسار المقطع (Section) ليبدأ من اليسار إلى اليمين
         index_section = doc.add_section(WD_SECTION_START.CONTINUOUS)
         sectPr = index_section._sectPr
         
-        # إزالة خاصية اليمين-لليسار من المقطع حتى تبدأ الأعمدة من اليسار (العمود 1 يسار، العمود 2 يمين)
         bidi_element = sectPr.find(qn('w:bidi'))
         if bidi_element is not None:
             sectPr.remove(bidi_element)
         sectPr.append(parse_xml(f'<w:bidi {nsdecls("w")} w:val="0"/>'))
         
-        # إضافة العمودين
         cols = parse_xml(f'<w:cols {nsdecls("w")} w:num="2" w:space="500" w:equalWidth="1"/>')
         sectPr.append(cols)
         
@@ -323,8 +321,8 @@ def build_professional_word_report(df, filename_base, report_mode, selected_card
         idx_table.alignment = WD_TABLE_ALIGNMENT.CENTER
         set_table_borders(idx_table, color_hex="2A4B7C")
         
-        # ترك الجدول من الداخل يعمل كنظام عربي (اليمين لليسار) للترتيب الداخلي
-        idx_table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
+        # ⭐ تم إزالة خاصية w:bidiVisual نهائياً حتى يتم هندسة الجدول ليكون LTR
+        # وهذا سيضمن أن العمود الأول (الترقيم) سيظهر أقصى اليسار داخل الجدول
         idx_table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
         
         idx_headers = ["ت", "اسم المواطن", "رقم البطاقة"]
@@ -344,8 +342,11 @@ def build_professional_word_report(df, filename_base, report_mode, selected_card
                 row_cells[i].width = idx_widths[i]
             set_cell_no_wrap(row_cells[1])
             
+            # العمود اليسار جداً: الترقيم (1, 2, 3)
             format_cell_with_auto_number(row_cells[0], seq_name="IndexSeq", current_val=idx+1, size_pt=12)
+            # العمود الوسط: الاسم (يتم محاذاته لليمين ليناسب العربية)
             format_cell_advanced(row_cells[1], row["اسم رب الأسرة"], size_pt=12, font_name="Calibri", align="right")
+            # العمود الأيمن جداً: رقم البطاقة
             format_cell_advanced(row_cells[2], row[selected_card_type], size_pt=12, font_name="Calibri", align="center")
 
     buffer = BytesIO()
@@ -357,7 +358,7 @@ def build_professional_word_report(df, filename_base, report_mode, selected_card
 # واجهة استخدام التطبيق (Streamlit Interface)
 # -----------------------------------------------------------------------------
 st.markdown("<h3 style='text-align: right;'>📂 رفع الكشف المراد تدقيقه وتنسيقه للمطبعة</h3>", unsafe_allow_html=True)
-uploaded_file = st.file_uploader("ارفع كشف الوكلاء", type=['docx'], key="doc_input_v9", label_visibility="collapsed")
+uploaded_file = st.file_uploader("ارفع كشف الوكلاء", type=['docx'], key="doc_input_v10", label_visibility="collapsed")
 
 st.markdown("<hr>", unsafe_allow_html=True)
 
