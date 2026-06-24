@@ -32,7 +32,6 @@ if "processing_done" not in st.session_state:
 # مساعدات التنسيق المتقدمة لملفات Word لفرض اتجاه اليسار لليمين (LTR) إجبارياً
 # -----------------------------------------------------------------------------
 def set_table_ltr(table):
-    """إجبار الجدول على الاتجاه من اليسار لليمين بترتيب XML صارم حتى لا يتجاهله Word"""
     tblPr = table._tbl.tblPr
     bidi = tblPr.find(qn('w:bidiVisual'))
     if bidi is not None:
@@ -47,7 +46,6 @@ def set_table_ltr(table):
     tblPr.insert(insert_idx, new_bidi)
 
 def set_section_ltr_and_cols(section, num_cols="2"):
-    """إجبار أعمدة الصفحة (Section) على التدفق من اليسار لليمين LTR بترتيب XML صارم"""
     sectPr = section._sectPr
     for el_name in ['w:cols', 'w:bidi', 'w:textDirection']:
         el = sectPr.find(qn(el_name))
@@ -57,7 +55,6 @@ def set_section_ltr_and_cols(section, num_cols="2"):
     cols = parse_xml(f'<w:cols {nsdecls("w")} w:num="{num_cols}" w:space="500" w:equalWidth="1"/>')
     bidi = parse_xml(f'<w:bidi {nsdecls("w")} w:val="0"/>')
     
-    # إدراج Bidi في مكانها الصحيح
     idx_bidi = len(sectPr)
     for el_name in ['w:rtlGutter', 'w:docGrid', 'w:printerSettings']:
         el = sectPr.find(qn(el_name))
@@ -65,7 +62,6 @@ def set_section_ltr_and_cols(section, num_cols="2"):
             idx_bidi = min(idx_bidi, sectPr.index(el))
     sectPr.insert(idx_bidi, bidi)
     
-    # إدراج الأعمدة في مكانها الصحيح قبل Bidi
     idx_cols = len(sectPr)
     for el_name in ['w:formProt', 'w:vAlign', 'w:noEndnote', 'w:titlePg', 'w:textDirection', 'w:bidi', 'w:rtlGutter', 'w:docGrid', 'w:printerSettings']:
         el = sectPr.find(qn(el_name))
@@ -185,9 +181,15 @@ def extract_and_clean_data(file_obj):
                 withheld, eligible, total = 0, digit_cells[0], digit_cells[1]
             else:
                 continue
-                
+            
+            # --- الإضافة الجديدة الخاصة بقص الاسم والاكتفاء بالاسم الثلاثي ---
+            full_name = cells[name_idx]
+            name_parts = full_name.split()
+            three_part_name = " ".join(name_parts[:3])  # أخذ أول 3 كلمات فقط
+            # ----------------------------------------------------------------
+            
             raw_records.append({
-                "اسم رب الأسرة": cells[name_idx],
+                "اسم رب الأسرة": three_part_name,
                 "رقم البطاقة القديم": old_card_num,
                 "رقم البطاقة الحديث": new_card_num,
                 "الكلي": total,
@@ -248,7 +250,7 @@ def build_professional_word_report(df, filename_base, report_mode, selected_card
         table.style = 'Table Grid'
         table.alignment = WD_TABLE_ALIGNMENT.CENTER
         set_table_borders(table, color_hex="2A4B7C")
-        set_table_ltr(table) # إجبار الجدول على اليسار-لليمين
+        set_table_ltr(table) 
         
         table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
         
@@ -341,13 +343,13 @@ def build_professional_word_report(df, filename_base, report_mode, selected_card
         idx_title_run.font.color.rgb = COLOR_NAVY_BLUE
         
         index_section = doc.add_section(WD_SECTION_START.CONTINUOUS)
-        set_section_ltr_and_cols(index_section, "2") # إجبار الأعمدة على ترتيب اليسار-لليمين
+        set_section_ltr_and_cols(index_section, "2")
         
         idx_table = doc.add_table(rows=1, cols=3)
         idx_table.style = 'Table Grid'
         idx_table.alignment = WD_TABLE_ALIGNMENT.CENTER
         set_table_borders(idx_table, color_hex="2A4B7C")
-        set_table_ltr(idx_table) # إجبار الجدول على اليسار-لليمين
+        set_table_ltr(idx_table) 
         
         idx_table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
         
@@ -368,7 +370,6 @@ def build_professional_word_report(df, filename_base, report_mode, selected_card
                 row_cells[i].width = idx_widths[i]
             set_cell_no_wrap(row_cells[1])
             
-            # العمود رقم 0 أصبح إجبارياً في أقصى اليسار
             format_cell_with_auto_number(row_cells[0], seq_name="IndexSeq", current_val=idx+1, size_pt=12)
             format_cell_advanced(row_cells[1], row["اسم رب الأسرة"], size_pt=12, font_name="Calibri", align="right")
             format_cell_advanced(row_cells[2], row[selected_card_type], size_pt=12, font_name="Calibri", align="center")
