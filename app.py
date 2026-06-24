@@ -29,8 +29,50 @@ if "processing_done" not in st.session_state:
     st.session_state.output_filename = ""
 
 # -----------------------------------------------------------------------------
-# مساعدات التنسيق المتقدمة لملفات Word عبر الـ XML
+# مساعدات التنسيق المتقدمة لملفات Word لفرض اتجاه اليسار لليمين (LTR) إجبارياً
 # -----------------------------------------------------------------------------
+def set_table_ltr(table):
+    """إجبار الجدول على الاتجاه من اليسار لليمين بترتيب XML صارم حتى لا يتجاهله Word"""
+    tblPr = table._tbl.tblPr
+    bidi = tblPr.find(qn('w:bidiVisual'))
+    if bidi is not None:
+        tblPr.remove(bidi)
+    
+    new_bidi = parse_xml(f'<w:bidiVisual {nsdecls("w")} w:val="0"/>')
+    insert_idx = len(tblPr)
+    for el_name in ['w:tblStyleRowBandSize', 'w:tblStyleColBandSize', 'w:tblW', 'w:jc', 'w:cellSpacing', 'w:tblInd', 'w:tblBorders', 'w:shd', 'w:tblLayout', 'w:tblCellMar', 'w:tblLook']:
+        el = tblPr.find(qn(el_name))
+        if el is not None:
+            insert_idx = min(insert_idx, tblPr.index(el))
+    tblPr.insert(insert_idx, new_bidi)
+
+def set_section_ltr_and_cols(section, num_cols="2"):
+    """إجبار أعمدة الصفحة (Section) على التدفق من اليسار لليمين LTR بترتيب XML صارم"""
+    sectPr = section._sectPr
+    for el_name in ['w:cols', 'w:bidi', 'w:textDirection']:
+        el = sectPr.find(qn(el_name))
+        if el is not None:
+            sectPr.remove(el)
+            
+    cols = parse_xml(f'<w:cols {nsdecls("w")} w:num="{num_cols}" w:space="500" w:equalWidth="1"/>')
+    bidi = parse_xml(f'<w:bidi {nsdecls("w")} w:val="0"/>')
+    
+    # إدراج Bidi في مكانها الصحيح
+    idx_bidi = len(sectPr)
+    for el_name in ['w:rtlGutter', 'w:docGrid', 'w:printerSettings']:
+        el = sectPr.find(qn(el_name))
+        if el is not None:
+            idx_bidi = min(idx_bidi, sectPr.index(el))
+    sectPr.insert(idx_bidi, bidi)
+    
+    # إدراج الأعمدة في مكانها الصحيح قبل Bidi
+    idx_cols = len(sectPr)
+    for el_name in ['w:formProt', 'w:vAlign', 'w:noEndnote', 'w:titlePg', 'w:textDirection', 'w:bidi', 'w:rtlGutter', 'w:docGrid', 'w:printerSettings']:
+        el = sectPr.find(qn(el_name))
+        if el is not None:
+            idx_cols = min(idx_cols, sectPr.index(el))
+    sectPr.insert(idx_cols, cols)
+
 def set_table_borders(table, color_hex="2A4B7C"):
     tblPr = table._tbl.tblPr
     borders = parse_xml(f'''
@@ -192,9 +234,6 @@ def build_professional_word_report(df, filename_base, report_mode, selected_card
     fldChar3 = parse_xml(f'<w:fldChar {nsdecls("w")} w:fldCharType="end"/>')
     f_run._r.extend([fldChar1, instrText, fldChar2, fldChar3])
 
-    # -------------------------------------------------------------------------
-    # الخيار الأول: الكشف الإحصائي الرئيسي 
-    # -------------------------------------------------------------------------
     if report_mode == "الكشف الإحصائي الرئيسي المنسق":
         title_p = doc.add_paragraph()
         title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
@@ -209,8 +248,8 @@ def build_professional_word_report(df, filename_base, report_mode, selected_card
         table.style = 'Table Grid'
         table.alignment = WD_TABLE_ALIGNMENT.CENTER
         set_table_borders(table, color_hex="2A4B7C")
+        set_table_ltr(table) # إجبار الجدول على اليسار-لليمين
         
-        # تم إزالة bidiVisual ليكون الجدول من اليسار إلى اليمين
         table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
         
         max_name_len = max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15)
@@ -291,10 +330,6 @@ def build_professional_word_report(df, filename_base, report_mode, selected_card
         stats_run.bold = True
         stats_run.font.color.rgb = COLOR_NAVY_BLUE
 
-    # -------------------------------------------------------------------------
-    # الخيار الثاني: فهرست الأسماء الأبجدي 
-    # (الجدول هنا يبدأ من اليسار تماماً: ت -> اسم -> بطاقة)
-    # -------------------------------------------------------------------------
     elif report_mode == "فهرست الأسماء الأبجدي المنسق":
         idx_title_p = doc.add_paragraph()
         idx_title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
@@ -306,23 +341,14 @@ def build_professional_word_report(df, filename_base, report_mode, selected_card
         idx_title_run.font.color.rgb = COLOR_NAVY_BLUE
         
         index_section = doc.add_section(WD_SECTION_START.CONTINUOUS)
-        sectPr = index_section._sectPr
-        
-        bidi_element = sectPr.find(qn('w:bidi'))
-        if bidi_element is not None:
-            sectPr.remove(bidi_element)
-        sectPr.append(parse_xml(f'<w:bidi {nsdecls("w")} w:val="0"/>'))
-        
-        cols = parse_xml(f'<w:cols {nsdecls("w")} w:num="2" w:space="500" w:equalWidth="1"/>')
-        sectPr.append(cols)
+        set_section_ltr_and_cols(index_section, "2") # إجبار الأعمدة على ترتيب اليسار-لليمين
         
         idx_table = doc.add_table(rows=1, cols=3)
         idx_table.style = 'Table Grid'
         idx_table.alignment = WD_TABLE_ALIGNMENT.CENTER
         set_table_borders(idx_table, color_hex="2A4B7C")
+        set_table_ltr(idx_table) # إجبار الجدول على اليسار-لليمين
         
-        # ⭐ تم إزالة خاصية w:bidiVisual نهائياً حتى يتم هندسة الجدول ليكون LTR
-        # وهذا سيضمن أن العمود الأول (الترقيم) سيظهر أقصى اليسار داخل الجدول
         idx_table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
         
         idx_headers = ["ت", "اسم المواطن", "رقم البطاقة"]
@@ -342,11 +368,9 @@ def build_professional_word_report(df, filename_base, report_mode, selected_card
                 row_cells[i].width = idx_widths[i]
             set_cell_no_wrap(row_cells[1])
             
-            # العمود اليسار جداً: الترقيم (1, 2, 3)
+            # العمود رقم 0 أصبح إجبارياً في أقصى اليسار
             format_cell_with_auto_number(row_cells[0], seq_name="IndexSeq", current_val=idx+1, size_pt=12)
-            # العمود الوسط: الاسم (يتم محاذاته لليمين ليناسب العربية)
             format_cell_advanced(row_cells[1], row["اسم رب الأسرة"], size_pt=12, font_name="Calibri", align="right")
-            # العمود الأيمن جداً: رقم البطاقة
             format_cell_advanced(row_cells[2], row[selected_card_type], size_pt=12, font_name="Calibri", align="center")
 
     buffer = BytesIO()
@@ -358,7 +382,7 @@ def build_professional_word_report(df, filename_base, report_mode, selected_card
 # واجهة استخدام التطبيق (Streamlit Interface)
 # -----------------------------------------------------------------------------
 st.markdown("<h3 style='text-align: right;'>📂 رفع الكشف المراد تدقيقه وتنسيقه للمطبعة</h3>", unsafe_allow_html=True)
-uploaded_file = st.file_uploader("ارفع كشف الوكلاء", type=['docx'], key="doc_input_v10", label_visibility="collapsed")
+uploaded_file = st.file_uploader("ارفع كشف الوكلاء", type=['docx'], key="doc_input_v11", label_visibility="collapsed")
 
 st.markdown("<hr>", unsafe_allow_html=True)
 
