@@ -389,7 +389,7 @@ if uploaded_file:
 
 if st.button("⚙️ تشغيل محرك التنظيم والتنسيق المتقدم الكلي"):
     if uploaded_file:
-        with St.spinner('جاري قراءة البيانات وترتيب القيود أبجدياً وبناء الهيكلية المطلوبة...'):
+        with st.spinner('جاري قراءة البيانات وترتيب القيود أبجدياً وبناء الهيكلية المطلوبة...'):
             try:
                 df_res = extract_and_clean_data(uploaded_file)
                 if not df_res.empty:
