@@ -29,7 +29,7 @@ if "processing_done" not in st.session_state:
     st.session_state.selected_card = ""
 
 # -----------------------------------------------------------------------------
-# دوال التنسيق المتقدمة
+# دوال التنسيق المتقدمة لـ Word
 # -----------------------------------------------------------------------------
 def set_table_borders(table, color_hex="2A4B7C"):
     tblPr = table._tbl.tblPr
@@ -81,13 +81,14 @@ def format_cell_advanced(cell, text, bold=False, color_rgb=None, size_pt=16, fon
         run.font.size = Pt(size_pt)
 
 # -----------------------------------------------------------------------------
-# المحرك الرصين (الرادار الموضعي) لاستخراج البيانات بدون ضياع
+# المحرك الرصين غير القابل للكسر (لا يسقط أي اسم مهما كان الخطأ)
 # -----------------------------------------------------------------------------
 def extract_and_clean_data(file_obj, card_choice):
     doc = Document(file_obj)
     raw_records = []
     
     lines = []
+    # تجميع النصوص من الفقرات والجداول
     for para in doc.paragraphs:
         if para.text.strip(): lines.append(para.text.strip())
             
@@ -128,36 +129,37 @@ def extract_and_clean_data(file_obj, card_choice):
         nums_before = [int(n) for n in re.findall(r'\d+', str_before)]
         nums_after = [int(n) for n in re.findall(r'\d+', str_after)]
         
-        cards_before = [n for n in nums_before if n > 10000]
-        smalls_before = [n for n in nums_before if n <= 1000]
+        cards_before = [n for n in nums_before if n >= 1000]
+        smalls_before = [n for n in nums_before if n < 1000]
         
-        cards_after = [n for n in nums_after if n > 10000]
-        smalls_after = [n for n in nums_after if n <= 1000]
+        cards_after = [n for n in nums_after if n >= 1000]
+        smalls_after = [n for n in nums_after if n < 1000]
         
-        # استخراج البطاقات
+        # استخراج البطاقات (تمت إضافة بروتوكول عدم الإسقاط)
         all_cards = cards_before + cards_after
-        if not all_cards: continue
-        
-        old_card = str(all_cards[0])
-        new_card = str(all_cards[-1]) if len(all_cards) >= 2 else old_card
-        selected_card = new_card if card_choice == "رقم البطاقة الحديث" else old_card
+        if not all_cards: 
+            selected_card = "غير متوفر" # لم يعد يسقط القيد بسبب فقدان البطاقة
+        else:
+            old_card = str(all_cards[0])
+            new_card = str(all_cards[-1]) if len(all_cards) >= 2 else old_card
+            selected_card = new_card if card_choice == "رقم البطاقة الحديث" else old_card
         
         total = eligible = withheld = 0
         
-        # استخراج الأفراد بناءً على التموضع الهندسي
+        # استخراج الأفراد بناءً على التموضع الهندسي الصارم
         if len(smalls_after) >= 3:
-            # التنسيق الأول: (الاسم ثم كلي, مستحق, محجوب)
+            # التنسيق الأول: نلتقط أول 3 أرقام بعد الاسم فقط لنتجاهل التسلسل اللاحق
             total = smalls_after[0]
             eligible = smalls_after[1]
             withheld = smalls_after[2]
         elif len(smalls_before) >= 3:
-            # التنسيق الثاني: (محجوب, مستحق, كلي ثم الاسم)
-            withheld = smalls_before[0]
-            eligible = smalls_before[1]
-            total = smalls_before[2]
+            # التنسيق الثاني: نلتقط آخر 3 أرقام قبل الاسم فقط لنتجاهل التسلسل الأولي
+            withheld = smalls_before[-3]
+            eligible = smalls_before[-2]
+            total = smalls_before[-1]
         else:
             # حالة طوارئ إذا سقط أحد الأرقام (نسحب أكبر رقم كلي)
-            all_smalls = [n for n in smalls_before + smalls_after if n <= 30]
+            all_smalls = [n for n in smalls_before + smalls_after if n <= 50]
             if len(all_smalls) >= 3:
                 total = max(all_smalls)
                 all_smalls.remove(total)
@@ -178,7 +180,7 @@ def extract_and_clean_data(file_obj, card_choice):
         
     df = pd.DataFrame(raw_records)
     if not df.empty:
-        # إزالة التكرارات الناتجة عن أخطاء النسخ واللصق فقط (بالتطابق التام للاسم والبطاقة)
+        # إزالة التكرارات الناتجة عن أخطاء النسخ واللصق فقط
         df = df.drop_duplicates(subset=["اسم رب الأسرة", "رقم البطاقة"])
         df = df.sort_values(by="اسم رب الأسرة").reset_index(drop=True)
         df.insert(0, "ت", df.index + 1)
@@ -324,7 +326,7 @@ def build_professional_word_report(df, filename_base, card_choice):
 # واجهة الاستخدام (Streamlit)
 # -----------------------------------------------------------------------------
 st.markdown("<h3 style='text-align: right;'>📂 رفع الكشف المراد تدقيقه وتنسيقه للمطبعة</h3>", unsafe_allow_html=True)
-uploaded_file = st.file_uploader("ارفع كشف الوكلاء", type=['docx'], key="doc_input_v7", label_visibility="collapsed")
+uploaded_file = st.file_uploader("ارفع كشف الوكلاء", type=['docx'], key="doc_input_v8", label_visibility="collapsed")
 
 st.markdown("<br>", unsafe_allow_html=True)
 selected_card = st.radio("اختر نوع رقم البطاقة المراد اعتماده في الكشف:", ["رقم البطاقة القديم", "رقم البطاقة الحديث"], index=0, horizontal=True)
@@ -357,7 +359,7 @@ if st.session_state.processing_done:
     output_filename = st.session_state.output_filename
     used_card_type = st.session_state.selected_card
     
-    st.success(f"✅ تم التنظيم الأبجدي والاستخراج الدقيق بنجاح لـ ({len(df_final)}) قيد اسم.")
+    st.success(f"✅ تم التنظيم الأبجدي والاستخراج الدقيق بنجاح لـ ({len(df_final)}) قيد اسم (تم تنظيف التكرارات).")
     
     with st.spinner('جاري صياغة وهيكلة مستند Word المطور...'):
         word_output = build_professional_word_report(df_final, output_filename, used_card_type)
