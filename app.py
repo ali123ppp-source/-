@@ -27,6 +27,7 @@ if "processing_done" not in st.session_state:
     st.session_state.df_final = None
     st.session_state.output_filename = ""
     st.session_state.selected_card = ""
+    st.session_state.template_choice = ""
 
 # -----------------------------------------------------------------------------
 # مساعدات التنسيق المتقدمة لملفات Word عبر الـ XML
@@ -111,7 +112,6 @@ def extract_and_clean_data(file_obj, card_choice):
             card_indices = [i for i, c in enumerate(cells) if c.isdigit() and len(c) >= 5]
             if not card_indices: continue
             
-            # تحديد رقم البطاقة بناءً على الاختيار
             old_card_num = cells[card_indices[0]]
             new_card_num = cells[card_indices[1]] if len(card_indices) > 1 else old_card_num
             selected_card_num = new_card_num if card_choice == "رقم البطاقة الحديث" else old_card_num
@@ -124,7 +124,7 @@ def extract_and_clean_data(file_obj, card_choice):
             else:
                 continue
             
-            # الإبقاء على 3 أسماء فقط وحذف اللقب أو الأسماء الزائدة
+            # قص اللقب والإبقاء على الاسم الثلاثي فقط بصرامة
             full_name = cells[name_idx]
             name_parts = full_name.split()
             three_part_name = " ".join(name_parts[:3])
@@ -144,7 +144,7 @@ def extract_and_clean_data(file_obj, card_choice):
     return df
 
 # -----------------------------------------------------------------------------
-# محرك بناء تقرير Word الاحترافي الجديد
+# محرك بناء تقرير Word - النموذج الأول (الأصلي)
 # -----------------------------------------------------------------------------
 def build_professional_word_report(df, filename_base, card_choice):
     doc = Document()
@@ -181,7 +181,6 @@ def build_professional_word_report(df, filename_base, card_choice):
     fldChar3 = parse_xml(f'<w:fldChar {nsdecls("w")} w:fldCharType="end"/>')
     f_run._r.extend([fldChar1, instrText, fldChar2, fldChar3])
     
-    # اسم عمود البطاقة سيتغير ديناميكياً بناءً على الاختيار
     headers = ["ت", "اسم رب الأسرة", "حقل فارغ", "الكلي", "مستحق", "محجوب", card_choice, "ملاحظات"]
     
     table = doc.add_table(rows=1, cols=8)
@@ -231,12 +230,10 @@ def build_professional_word_report(df, filename_base, card_choice):
     
     for idx, row in df.iterrows():
         row_cells = table.add_row().cells
-        
         r_trPr = table.rows[idx+1]._tr.get_or_add_trPr()
         r_trPr.append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
         
         is_eligible_zero = int(row["مستحق"]) == 0
-        
         for i in range(8):
             row_cells[i].width = col_widths[i]
             
@@ -258,7 +255,7 @@ def build_professional_word_report(df, filename_base, card_choice):
             elif i == 5: 
                 val = row["محجوب"]
                 font_size = 14  
-            elif i == 6: val = row["رقم البطاقة"] # تم ربطها بالمتغير الموحد
+            elif i == 6: val = row["رقم البطاقة"] 
             elif i == 7: 
                 val = "محجوب" if is_eligible_zero else "" 
                 if is_eligible_zero:
@@ -275,6 +272,147 @@ def build_professional_word_report(df, filename_base, card_choice):
                 elif i == 4: set_cell_background(row_cells[i], HEX_LIGHT_GREEN)  
                 elif i == 5: set_cell_background(row_cells[i], HEX_LIGHT_RED)    
 
+    return save_doc_buffer(doc, df)
+
+# -----------------------------------------------------------------------------
+# محرك بناء تقرير Word - النموذج الثاني (مواصفات حجم 14 وحقلين فارغين ورصاصي)
+# -----------------------------------------------------------------------------
+def build_professional_word_report_v2(df, filename_base, card_choice):
+    doc = Document()
+    
+    for section in doc.sections:
+        section.top_margin = Cm(0.5)
+        section.bottom_margin = Cm(0.5)
+        section.left_margin = Cm(0.3)
+        section.right_margin = Cm(0.3)
+        
+    clean_name = filename_base
+    words_to_remove = ["مستكشف", "معدل", "كشف", "منسق", "جاهز"]
+    for w in words_to_remove:
+        clean_name = clean_name.replace(w, "")
+    clean_name = re.sub(r'[a-zA-Z]', '', clean_name)
+    clean_name = re.sub(r'[\-_+_.]', '', clean_name)
+    clean_name = " ".join(clean_name.split())
+    
+    title_p = doc.add_paragraph()
+    title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    title_run = title_p.add_run(f"الكشف الإحصائي المنسق للوكيل: {clean_name}")
+    title_run.font.name = "Segoe UI Semibold"
+    title_run.font.size = Pt(14)
+    title_run.bold = True
+    
+    footer = doc.sections[0].footer
+    footer_p = footer.paragraphs[0]
+    footer_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    f_run = footer_p.add_run("صفحة ")
+    f_run.font.size = Pt(10)
+    fldChar1 = parse_xml(f'<w:fldChar {nsdecls("w")} w:fldCharType="begin"/>')
+    instrText = parse_xml(f'<w:instrText {nsdecls("w")} xml:space="preserve"> PAGE </w:instrText>')
+    fldChar2 = parse_xml(f'<w:fldChar {nsdecls("w")} w:fldCharType="separate"/>')
+    fldChar3 = parse_xml(f'<w:fldChar {nsdecls("w")} w:fldCharType="end"/>')
+    f_run._r.extend([fldChar1, instrText, fldChar2, fldChar3])
+    
+    # 9 أعمدة بسبب إضافة حقل فارغ إضافي جنب الحقل الفارغ
+    headers = ["ت", "اسم رب الأسرة", "حقل فارغ 1", "حقل فارغ 2", "الكلي", "مستحق", "محجوب", card_choice, "ملاحظات"]
+    
+    table = doc.add_table(rows=1, cols=9)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    
+    set_table_borders(table, color_hex="2A4B7C")
+    
+    tblPr = table._tbl.tblPr
+    tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
+    
+    trPr = table.rows[0]._tr.get_or_add_trPr()
+    trPr.append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
+    
+    max_name_len = max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15)
+    dynamic_name_width = Cm(max_name_len * 0.22 + 0.5)
+    
+    # توزيع المقاسات الصارمة الجديدة للقالب الثاني
+    col_widths = [
+        Cm(0.9),              # ت
+        dynamic_name_width,   # اسم رب الأسرة
+        Cm(0.80),             # حقل فارغ 1
+        Cm(0.80),             # حقل فارغ 2
+        Cm(0.9),              # الكلي
+        Cm(0.9),              # مستحق
+        Cm(0.9),              # محجوب
+        Cm(3.0),              # رقم البطاقة
+        Cm(1.80)              # ملاحظات المحدث
+    ]
+    
+    COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
+    
+    hdr_cells = table.rows[0].cells
+    for i, title in enumerate(headers):
+        hdr_cells[i].width = col_widths[i]
+        
+        # حقول الأرقام زُحزحت للمؤشرات (4، 5، 6) بسبب الحقل الفارغ الإضافي
+        if i in [4, 5, 6]:
+            set_cell_vertical_text(hdr_cells[i])
+            format_cell_advanced(hdr_cells[i], title, bold=True, size_pt=14, font_name="Segoe UI Semibold", align="center", color_rgb=COLOR_NAVY_BLUE)
+        else:
+            cell_align = "left" if i == 1 else "center"
+            format_cell_advanced(hdr_cells[i], title, bold=True, size_pt=14, font_name="Segoe UI Semibold", align=cell_align, color_rgb=COLOR_NAVY_BLUE)
+            
+    HEX_ELEGANT_BLUE = "D4E6F1"
+    HEX_LIGHT_BLUE = "EBF5FB"
+    HEX_LIGHT_GREEN = "E8F8F5"
+    HEX_LIGHT_GRAY = "E5E7E9"   # لون رصاصي فاتح لعمود المحجوبين بالكامل
+    HEX_ALERT_RED = "EC7063"
+    
+    for idx, row in df.iterrows():
+        row_cells = table.add_row().cells
+        r_trPr = table.rows[idx+1]._tr.get_or_add_trPr()
+        r_trPr.append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
+        
+        is_eligible_zero = int(row["مستحق"]) == 0
+        for i in range(9):
+            row_cells[i].width = col_widths[i]
+            
+        set_cell_no_wrap(row_cells[1])
+        
+        for i in range(9):
+            val = ""
+            text_color = None
+            cell_align = "center"
+            font_size = 14  # حجم الخط للجميع 14 بصرامة
+            
+            if i == 0: val = row["ت"]
+            elif i == 1: 
+                val = row["اسم رب الأسرة"]
+                cell_align = "left" 
+            elif i == 2: val = "x" if is_eligible_zero else "" 
+            elif i == 3: val = "x" if is_eligible_zero else "" 
+            elif i == 4: val = row["الكلي"]
+            elif i == 5: val = row["مستحق"]
+            elif i == 6: val = row["محجوب"]
+            elif i == 7: val = row["رقم البطاقة"]
+            elif i == 8: 
+                val = "محجوب" if is_eligible_zero else "" 
+                if is_eligible_zero:
+                    text_color = RGBColor(203, 67, 53)
+                    
+            format_cell_advanced(row_cells[i], val, size_pt=font_size, font_name="Calibri", color_rgb=text_color, align=cell_align)
+            
+            if is_eligible_zero:
+                set_cell_background(row_cells[i], HEX_ALERT_RED)
+            else:
+                if i == 0: set_cell_background(row_cells[i], HEX_ELEGANT_BLUE)
+                elif i == 4: set_cell_background(row_cells[i], HEX_LIGHT_BLUE)   
+                elif i == 5: set_cell_background(row_cells[i], HEX_LIGHT_GREEN)  
+            
+            # تضليل عمود المحجوبين كاملة بلون رصاصي فاتح بصرامة (المؤشر رقم 6)
+            if i == 6:
+                set_cell_background(row_cells[i], HEX_LIGHT_GRAY)
+
+    return save_doc_buffer(doc, df)
+
+# دالة لحفظ وعرض الإحصائيات تحت الجدول
+def save_doc_buffer(doc, df):
+    COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
     total_all = df["الكلي"].astype(int).sum()
     total_eligible = df["مستحق"].astype(int).sum()
     total_withheld = df["محجوب"].astype(int).sum()
@@ -308,31 +446,43 @@ uploaded_file = st.file_uploader("ارفع كشف الوكلاء", type=['docx']
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# إضافة خيار اختيار نوع البطاقة قبل التنظيم
-selected_card = st.radio(
-    "اختر نوع رقم البطاقة المراد اعتماده في الكشف:",
-    ["رقم البطاقة القديم", "رقم البطاقة الحديث"],
-    index=0,
-    horizontal=True
-)
+col1, col2 = st.columns(2)
+
+with col1:
+    selected_card = st.radio(
+        "📄 اختر نوع رقم البطاقة المراد اعتماده:",
+        ["رقم البطاقة القديم", "رقم البطاقة الحديث"],
+        index=0,
+        horizontal=True
+    )
+
+with col2:
+    template_choice = st.radio(
+        "🎨 اختر نموذج قالب الـ Word المطلوب:",
+        ["النموذج الأول (الأصلي المطور)", "النموذج الثاني (حجم 14 وحقلين فارغين)"],
+        index=0,
+        horizontal=True
+    )
 
 st.markdown("<br>", unsafe_allow_html=True)
 
 if uploaded_file:
     current_filename = uploaded_file.name.rsplit('.', 1)[0]
-    if st.session_state.output_filename != current_filename or st.session_state.selected_card != selected_card:
+    if (st.session_state.output_filename != current_filename or 
+        st.session_state.selected_card != selected_card or 
+        st.session_state.template_choice != template_choice):
         st.session_state.processing_done = False
 
 if st.button("⚙️ تشغيل محرك التنظيم والتنسيق المتقدم الكلي"):
     if uploaded_file:
         with st.spinner('جاري ترتيب القيود أبجدياً وإعداد التنسيق الشرطي والمقاييس...'):
             try:
-                # تمرير نوع البطاقة المختار إلى محرك القراءة
                 df_res = extract_and_clean_data(uploaded_file, selected_card)
                 if not df_res.empty:
                     st.session_state.df_final = df_res
                     st.session_state.output_filename = uploaded_file.name.rsplit('.', 1)[0]
                     st.session_state.selected_card = selected_card
+                    st.session_state.template_choice = template_choice
                     st.session_state.processing_done = True
                 else:
                     st.error("لم يتم العثور على بيانات جداول متوافقة.")
@@ -345,11 +495,15 @@ if st.session_state.processing_done:
     df_final = st.session_state.df_final
     output_filename = st.session_state.output_filename
     used_card_type = st.session_state.selected_card
+    used_template = st.session_state.template_choice
     
-    st.success(f"✅ تم التنظيم الأبجدي بنجاح لـ ({len(df_final)}) قيد اسم.")
+    st.success(f"✅ تم التنظيم الأبجدي بنجاح لـ ({len(df_final)}) قيد اسم (تم قصرها على الاسم الثلاثي).")
     
-    with st.spinner('جاري صياغة وهيكلة مستند Word المطور...'):
-        word_output = build_professional_word_report(df_final, output_filename, used_card_type)
+    with st.spinner('جاري صياغة وهيكلة مستند Word المطور المختار...'):
+        if used_template == "النموذج الأول (الأصلي المطور)":
+            word_output = build_professional_word_report(df_final, output_filename, used_card_type)
+        else:
+            word_output = build_professional_word_report_v2(df_final, output_filename, used_card_type)
         
     st.download_button(
         label="📥 تحميل كشف الوكلاء المنسق والجاهز للطباعة فوراً (Word)",
