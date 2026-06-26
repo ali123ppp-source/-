@@ -29,7 +29,7 @@ if "processing_done" not in st.session_state:
     st.session_state.selected_card = ""
 
 # -----------------------------------------------------------------------------
-# مساعدات التنسيق المتقدمة لملفات Word عبر الـ XML
+# دوال التنسيق المتقدمة
 # -----------------------------------------------------------------------------
 def set_table_borders(table, color_hex="2A4B7C"):
     tblPr = table._tbl.tblPr
@@ -81,13 +81,12 @@ def format_cell_advanced(cell, text, bold=False, color_rgb=None, size_pt=16, fon
         run.font.size = Pt(size_pt)
 
 # -----------------------------------------------------------------------------
-# المحرك الرياضي واللغوي الشامل (يقرأ أي ملف مهما كان مشوهاً)
+# المحرك الرصين (الرادار الموضعي) لاستخراج البيانات بدون ضياع
 # -----------------------------------------------------------------------------
 def extract_and_clean_data(file_obj, card_choice):
     doc = Document(file_obj)
     raw_records = []
     
-    # 1. تجميع كل النصوص وتحطيم حواجز الجداول
     lines = []
     for para in doc.paragraphs:
         if para.text.strip(): lines.append(para.text.strip())
@@ -97,71 +96,78 @@ def extract_and_clean_data(file_obj, card_choice):
             cells_text = [cell.text.strip().replace('\n', ' ') for cell in row.cells]
             lines.append(" ".join(cells_text))
             
-    # 2. الاستخراج الذكي المستند إلى الرياضيات واللغة
     for line in lines:
-        # توحيد الفواصل والمسافات الناتجة عن الـ CSV المدمج
         line_clean = line.replace(',', ' ').replace('،', ' ').replace('-', ' ')
         line_clean = re.sub(r'\s+', ' ', line_clean).strip()
         
         if not line_clean: continue
-        if "المركز" in line_clean or "اسم رب" in line_clean or "الوكيل" in line_clean: continue
-            
-        # أ- استخراج البطاقات (أرقام تتجاوز 4 مراتب)
-        cards = [n for n in re.findall(r'\d+', line_clean) if len(n) >= 5]
-        if not cards: continue
-            
-        new_card = cards[1] if len(cards) >= 2 else cards[0]
-        old_card = cards[0]
-        selected_card = new_card if card_choice == "رقم البطاقة الحديث" else old_card
         
-        # ب- استخراج الاسم الذكي (أطول سلسلة عربية نقية)
-        arabic_segments = re.findall(r'[\u0600-\u06FF\s]+', line_clean)
-        valid_names = [s.strip() for s in arabic_segments if len(s.strip().split()) >= 2 and "ملاحظات" not in s and "الوكيل" not in s and "فارغ" not in s]
+        # استخراج الاسم الصافي وتجنب كلمات الهيدر
+        names = re.findall(r'[\u0600-\u06FF]{2,}(?:\s+[\u0600-\u06FF]{1,})+', line_clean)
+        valid_names = [n for n in names if not any(w in n for w in ["المركز", "اسم رب", "ملاحظات", "الوكيل", "الافراد", "الكلية", "المحجوبين"])]
         if not valid_names: continue
             
-        name_candidate = max(valid_names, key=len)
-        name_parts = name_candidate.split()
+        full_name = max(valid_names, key=len).strip()
         
-        # خوارزمية الأسماء المركبة (حماية عبد، أبو، أم، آل)
-        compound_prefixes = ["عبد", "ابو", "أبو", "ام", "أم", "آل", "ال"]
-        real_words = 0
+        # فلتر الأسماء المركبة
+        name_parts = full_name.split()
+        prefixes = ["عبد", "ابو", "أبو", "ام", "أم", "آل", "ال"]
         final_parts = []
+        real_words = 0
         for p in name_parts:
             final_parts.append(p)
-            if p not in compound_prefixes: real_words += 1
+            if p not in prefixes: real_words += 1
             if real_words >= 3: break
         three_part_name = " ".join(final_parts)
         
-        # ج- الاستخراج الرياضي للإحصائيات (قاعدة: محجوب + مستحق = كلي)
-        smalls = [int(n) for n in re.findall(r'\d+', line_clean) if len(n) < 5]
-        withheld, eligible, total = -1, -1, -1
+        # تقسيم السطر لمعرفة تموضع الأرقام (الرادار الموضعي)
+        idx = line_clean.find(full_name)
+        str_before = line_clean[:idx]
+        str_after = line_clean[idx+len(full_name):]
         
-        if len(smalls) >= 3:
-            found_math = False
-            # البحث عن أول 3 أرقام تحقق المعادلة
-            for i in range(len(smalls) - 2):
-                if smalls[i] + smalls[i+1] == smalls[i+2]:
-                    withheld, eligible, total = smalls[i], smalls[i+1], smalls[i+2]
-                    found_math = True
-                    break
-            
-            # إن لم يجد، يبحث عن رقمين متساويين (يعني المحجوب صفر)
-            if not found_math:
-                for i in range(len(smalls) - 1):
-                    if smalls[i] == smalls[i+1] and smalls[i] > 0:
-                        withheld, eligible, total = 0, smalls[i], smalls[i+1]
-                        found_math = True
-                        break
-            
-            # خيار الطوارئ
-            if not found_math:
-                withheld, eligible, total = smalls[0], smalls[1], smalls[2]
-                
-        elif len(smalls) == 2:
-            withheld, eligible, total = 0, smalls[0], smalls[1]
+        nums_before = [int(n) for n in re.findall(r'\d+', str_before)]
+        nums_after = [int(n) for n in re.findall(r'\d+', str_after)]
+        
+        cards_before = [n for n in nums_before if n > 10000]
+        smalls_before = [n for n in nums_before if n <= 1000]
+        
+        cards_after = [n for n in nums_after if n > 10000]
+        smalls_after = [n for n in nums_after if n <= 1000]
+        
+        # استخراج البطاقات
+        all_cards = cards_before + cards_after
+        if not all_cards: continue
+        
+        old_card = str(all_cards[0])
+        new_card = str(all_cards[-1]) if len(all_cards) >= 2 else old_card
+        selected_card = new_card if card_choice == "رقم البطاقة الحديث" else old_card
+        
+        total = eligible = withheld = 0
+        
+        # استخراج الأفراد بناءً على التموضع الهندسي
+        if len(smalls_after) >= 3:
+            # التنسيق الأول: (الاسم ثم كلي, مستحق, محجوب)
+            total = smalls_after[0]
+            eligible = smalls_after[1]
+            withheld = smalls_after[2]
+        elif len(smalls_before) >= 3:
+            # التنسيق الثاني: (محجوب, مستحق, كلي ثم الاسم)
+            withheld = smalls_before[0]
+            eligible = smalls_before[1]
+            total = smalls_before[2]
         else:
-            continue
-            
+            # حالة طوارئ إذا سقط أحد الأرقام (نسحب أكبر رقم كلي)
+            all_smalls = [n for n in smalls_before + smalls_after if n <= 30]
+            if len(all_smalls) >= 3:
+                total = max(all_smalls)
+                all_smalls.remove(total)
+                eligible = max(all_smalls)
+                withheld = min(all_smalls)
+            elif len(all_smalls) == 2:
+                total = max(all_smalls)
+                eligible = min(all_smalls)
+                withheld = 0
+
         raw_records.append({
             "اسم رب الأسرة": three_part_name,
             "رقم البطاقة": selected_card,
@@ -172,7 +178,7 @@ def extract_and_clean_data(file_obj, card_choice):
         
     df = pd.DataFrame(raw_records)
     if not df.empty:
-        # إزالة التكرارات الناتجة عن دمج الخلايا في الوورد
+        # إزالة التكرارات الناتجة عن أخطاء النسخ واللصق فقط (بالتطابق التام للاسم والبطاقة)
         df = df.drop_duplicates(subset=["اسم رب الأسرة", "رقم البطاقة"])
         df = df.sort_values(by="اسم رب الأسرة").reset_index(drop=True)
         df.insert(0, "ت", df.index + 1)
@@ -180,7 +186,7 @@ def extract_and_clean_data(file_obj, card_choice):
     return df
 
 # -----------------------------------------------------------------------------
-# محرك بناء تقرير Word الاحترافي الجديد
+# محرك بناء تقرير Word
 # -----------------------------------------------------------------------------
 def build_professional_word_report(df, filename_base, card_choice):
     doc = Document()
@@ -315,10 +321,10 @@ def build_professional_word_report(df, filename_base, card_choice):
     return buffer
 
 # -----------------------------------------------------------------------------
-# واجهة الاستخدام (Streamlit Interface)
+# واجهة الاستخدام (Streamlit)
 # -----------------------------------------------------------------------------
 st.markdown("<h3 style='text-align: right;'>📂 رفع الكشف المراد تدقيقه وتنسيقه للمطبعة</h3>", unsafe_allow_html=True)
-uploaded_file = st.file_uploader("ارفع كشف الوكلاء", type=['docx'], key="doc_input_v6", label_visibility="collapsed")
+uploaded_file = st.file_uploader("ارفع كشف الوكلاء", type=['docx'], key="doc_input_v7", label_visibility="collapsed")
 
 st.markdown("<br>", unsafe_allow_html=True)
 selected_card = st.radio("اختر نوع رقم البطاقة المراد اعتماده في الكشف:", ["رقم البطاقة القديم", "رقم البطاقة الحديث"], index=0, horizontal=True)
@@ -331,7 +337,7 @@ if uploaded_file:
 
 if st.button("⚙️ تشغيل محرك التنظيم والتنسيق المتقدم الكلي"):
     if uploaded_file:
-        with st.spinner('جاري قراءة وتحليل البيانات بالذكاء الرياضي وإعداد التنسيق...'):
+        with st.spinner('جاري قراءة وتحليل البيانات بالرادار الموضعي...'):
             try:
                 df_res = extract_and_clean_data(uploaded_file, selected_card)
                 if not df_res.empty:
