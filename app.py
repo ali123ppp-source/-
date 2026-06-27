@@ -270,6 +270,62 @@ def build_professional_word_report_v2(df, filename_base, card_choice):
 # -----------------------------------------------------------------------------
 def build_professional_word_report_v3(df, filename_base, card_choice):
     doc = Document()
+    for section in doc.sections:
+        section.top_margin, section.bottom_margin, section.left_margin, section.right_margin = Cm(0.5), Cm(0.5), Cm(0.3), Cm(0.3)
+        
+    clean_name = filename_base
+    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز"]:
+        clean_name = clean_name.replace(w, "")
+    clean_name = re.sub(r'[a-zA-Z]', '', clean_name)
+    clean_name = re.sub(r'[\-_+_.]', '', clean_name)
+    clean_name = " ".join(clean_name.split())
+    
+    title_p = doc.add_paragraph()
+    title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    title_run = title_p.add_run(f"الكشف الإحصائي المنسق للوكيل: {clean_name}")
+    title_run.font.name, title_run.font.size, title_run.bold = "Segoe UI Semibold", Pt(14), True
+    
+    headers = ["ت", "اسم رب الأسرة", card_choice, "الكلي", "مستحق", "محجوب", "الشهر الأول", "الشهر الثاني", "الشهر الثالث", "الشهر الرابع"]
+    table = doc.add_table(rows=1, cols=10)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    set_table_borders(table, color_hex="2A4B7C")
+    table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
+    table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
+    
+    dynamic_name_width = Cm(max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15) * 0.22 + 0.5)
+    col_widths = [Cm(0.9), dynamic_name_width, Cm(3.0), Cm(0.9), Cm(0.9), Cm(0.9), Cm(2.3), Cm(2.3), Cm(2.3), Cm(2.3)]
+    COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
+    
+    for i, title in enumerate(headers):
+        table.rows[0].cells[i].width = col_widths[i]
+        if i in [3, 4, 5]: set_cell_vertical_text(table.rows[0].cells[i])
+        format_cell_advanced(table.rows[0].cells[i], title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="left" if i == 1 else "center", color_rgb=COLOR_NAVY_BLUE)
+            
+    for idx, row in df.iterrows():
+        row_cells = table.add_row().cells
+        table.rows[idx+1]._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
+        is_eligible_zero = int(row["مستحق"]) == 0
+        set_cell_no_wrap(row_cells[1])
+        
+        for i in range(10):
+            row_cells[i].width = col_widths[i]
+            val = row["ت"] if i==0 else row["اسم رب الأسرة"] if i==1 else row["رقم البطاقة"] if i==2 else row["الكلي"] if i==3 else row["مستحق"] if i==4 else row["محجوب"] if i==5 else ""
+            format_cell_advanced(row_cells[i], val, size_pt=16, font_name="Calibri", color_rgb=None, align="left" if i==1 else "center")
+            
+            if is_eligible_zero: set_cell_background(row_cells[i], "EC7063")
+            else:
+                if i == 0: set_cell_background(row_cells[i], "D4E6F1")
+            
+            if i == 3: set_cell_background(row_cells[i], "E5E7E9")
+            if i == 5: set_cell_background(row_cells[i], "FCF3CF")
+    return save_doc_buffer(doc, df)
+
+# -----------------------------------------------------------------------------
+# محرك بناء تقرير Word - النموذج الرابع (12 سلة، مستحق فقط)
+# -----------------------------------------------------------------------------
+def build_professional_word_report_v4(df, filename_base, card_choice):
+    doc = Document()
     
     for section in doc.sections:
         section.top_margin = Cm(0.5)
@@ -292,10 +348,10 @@ def build_professional_word_report_v3(df, filename_base, card_choice):
     title_run.font.size = Pt(14)
     title_run.bold = True
     
-    # 10 أعمدة بالترتيب المطلوب
-    headers = ["ت", "اسم رب الأسرة", card_choice, "الكلي", "مستحق", "محجوب", "الشهر الأول", "الشهر الثاني", "الشهر الثالث", "الشهر الرابع"]
+    # 16 عمود بالترتيب المطلوب
+    headers = ["ت", card_choice, "اسم المواطن", "المستحق"] + [f"سلة {i}" for i in range(1, 13)]
     
-    table = doc.add_table(rows=1, cols=10)
+    table = doc.add_table(rows=1, cols=16)
     table.style = 'Table Grid'
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     
@@ -310,19 +366,13 @@ def build_professional_word_report_v3(df, filename_base, card_choice):
     max_name_len = max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15)
     dynamic_name_width = Cm(max_name_len * 0.22 + 0.5)
     
-    # توزيع المقاسات للنموذج الثالث (الحقول 4 الأخيرة متساوية لتملأ الفراغ)
+    # توزيع المقاسات للنموذج الرابع (12 سلة تملأ الورقة بأحجام متساوية)
     col_widths = [
         Cm(0.9),              # ت
-        dynamic_name_width,   # اسم رب الأسرة
-        Cm(3.0),              # رقم البطاقة
-        Cm(0.9),              # الكلي
-        Cm(0.9),              # مستحق
-        Cm(0.9),              # محجوب
-        Cm(2.3),              # الشهر الأول
-        Cm(2.3),              # الشهر الثاني
-        Cm(2.3),              # الشهر الثالث
-        Cm(2.3)               # الشهر الرابع
-    ]
+        Cm(2.5),              # رقم البطاقة
+        dynamic_name_width,   # اسم المواطن
+        Cm(0.9)               # المستحق
+    ] + [Cm(1.05)] * 12       # 12 سلة بأحجام متساوية 
     
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
     
@@ -330,17 +380,15 @@ def build_professional_word_report_v3(df, filename_base, card_choice):
     for i, title in enumerate(headers):
         hdr_cells[i].width = col_widths[i]
         
-        # الكلي ومستحق ومحجوب بشكل عمودي لتوفير المساحة
-        if i in [3, 4, 5]:
+        # جعل النصوص عمودية للأعمدة الضيقة من المستحق إلى آخر سلة لتوفير مساحة
+        if i >= 3:
             set_cell_vertical_text(hdr_cells[i])
         
-        cell_align = "left" if i == 1 else "center"
-        # حجم الخط للعناوين 12 بصرامة
+        cell_align = "left" if i == 2 else "center"
         format_cell_advanced(hdr_cells[i], title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align=cell_align, color_rgb=COLOR_NAVY_BLUE)
             
     HEX_ELEGANT_BLUE = "D4E6F1"
-    HEX_LIGHT_GRAY = "E5E7E9"    # الكلي رصاصي فاتح
-    HEX_LIGHT_YELLOW = "FCF3CF"  # محجوب أصفر فاتح
+    HEX_LIGHT_GREEN = "E8F8F5"
     HEX_ALERT_RED = "EC7063"
     
     for idx, row in df.iterrows():
@@ -350,38 +398,31 @@ def build_professional_word_report_v3(df, filename_base, card_choice):
         
         is_eligible_zero = int(row["مستحق"]) == 0
         
-        set_cell_no_wrap(row_cells[1])
+        set_cell_no_wrap(row_cells[2])
         
-        for i in range(10):
+        for i in range(16):
             row_cells[i].width = col_widths[i]
             
             val = ""
             cell_align = "center"
-            font_size = 16  # حجم الخط لباقي التفاصيل 16 بصرامة
+            font_size = 14  # حجم خط 14 ليتناسب مع 16 عمود
             
             if i == 0: val = row["ت"]
-            elif i == 1: 
+            elif i == 1: val = row["رقم البطاقة"]
+            elif i == 2: 
                 val = row["اسم رب الأسرة"]
                 cell_align = "left" 
-            elif i == 2: val = row["رقم البطاقة"]
-            elif i == 3: val = row["الكلي"]
-            elif i == 4: val = row["مستحق"]
-            elif i == 5: val = row["محجوب"]
-            elif i in [6, 7, 8, 9]: val = "" # حقول الأشهر تبقى فارغة
+            elif i == 3: val = row["مستحق"]
+            elif i >= 4: val = "" # حقول السلات الـ 12 تبقى فارغة
                     
             format_cell_advanced(row_cells[i], val, size_pt=font_size, font_name="Calibri", color_rgb=None, align=cell_align)
             
-            # تلوين الخلفيات حسب الطلب الصارم
+            # التنسيق اللوني
             if is_eligible_zero:
                 set_cell_background(row_cells[i], HEX_ALERT_RED)
             else:
                 if i == 0: set_cell_background(row_cells[i], HEX_ELEGANT_BLUE)
-            
-            # تظليل عامود الكلي بالرصاصي وعامود المحجوب بالأصفر (يطبق دائماً كما طلبت)
-            if i == 3:
-                set_cell_background(row_cells[i], HEX_LIGHT_GRAY)
-            if i == 5:
-                set_cell_background(row_cells[i], HEX_LIGHT_YELLOW)
+                if i == 3: set_cell_background(row_cells[i], HEX_LIGHT_GREEN)
 
     return save_doc_buffer(doc, df)
 
@@ -454,7 +495,8 @@ with col2:
         [
             "النموذج الأول (الأصلي المطور)", 
             "النموذج الثاني (حجم 14 وحقلين فارغين)",
-            "النموذج الثالث (خط 16، عناوين 12، 4 أشهر)"
+            "النموذج الثالث (خط 16، عناوين 12، 4 أشهر)",
+            "النموذج الرابع (12 سلة، مستحق فقط)"
         ],
         index=0,
         horizontal=False
@@ -500,8 +542,10 @@ if st.session_state.processing_done:
             word_output = build_professional_word_report(df_final, output_filename, used_card_type)
         elif used_template == "النموذج الثاني (حجم 14 وحقلين فارغين)":
             word_output = build_professional_word_report_v2(df_final, output_filename, used_card_type)
-        else:
+        elif used_template == "النموذج الثالث (خط 16، عناوين 12، 4 أشهر)":
             word_output = build_professional_word_report_v3(df_final, output_filename, used_card_type)
+        else:
+            word_output = build_professional_word_report_v4(df_final, output_filename, used_card_type)
         
     st.download_button(
         label="📥 تحميل كشف الوكلاء المنسق والجاهز للطباعة فوراً (Word)",
