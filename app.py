@@ -322,7 +322,7 @@ def build_professional_word_report_v3(df, filename_base, card_choice):
     return save_doc_buffer(doc, df)
 
 # -----------------------------------------------------------------------------
-# محرك بناء تقرير Word - النموذج الرابع (12 سلة، مستحق فقط)
+# محرك بناء تقرير Word - النموذج الرابع (12 سلة، التعديل: العدد الكلي للأفراد)
 # -----------------------------------------------------------------------------
 def build_professional_word_report_v4(df, filename_base, card_choice):
     doc = Document()
@@ -348,8 +348,8 @@ def build_professional_word_report_v4(df, filename_base, card_choice):
     title_run.font.size = Pt(14)
     title_run.bold = True
     
-    # 16 عمود بالترتيب المطلوب
-    headers = ["ت", card_choice, "اسم المواطن", "المستحق"] + [f"سلة {i}" for i in range(1, 13)]
+    # تم تغيير عنوان العمود الرابع إلى "العدد الكلي" بدلاً من المستحق
+    headers = ["ت", card_choice, "اسم المواطن", "العدد الكلي"] + [f"سلة {i}" for i in range(1, 13)]
     
     table = doc.add_table(rows=1, cols=16)
     table.style = 'Table Grid'
@@ -371,7 +371,7 @@ def build_professional_word_report_v4(df, filename_base, card_choice):
         Cm(0.9),              # ت
         Cm(2.5),              # رقم البطاقة
         dynamic_name_width,   # اسم المواطن
-        Cm(0.9)               # المستحق
+        Cm(0.9)               # العدد الكلي
     ] + [Cm(1.05)] * 12       # 12 سلة بأحجام متساوية 
     
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
@@ -380,7 +380,7 @@ def build_professional_word_report_v4(df, filename_base, card_choice):
     for i, title in enumerate(headers):
         hdr_cells[i].width = col_widths[i]
         
-        # جعل النصوص عمودية للأعمدة الضيقة من المستحق إلى آخر سلة لتوفير مساحة
+        # جعل النصوص عمودية للأعمدة الضيقة من العدد الكلي إلى آخر سلة لتوفير مساحة
         if i >= 3:
             set_cell_vertical_text(hdr_cells[i])
         
@@ -412,7 +412,7 @@ def build_professional_word_report_v4(df, filename_base, card_choice):
             elif i == 2: 
                 val = row["اسم رب الأسرة"]
                 cell_align = "left" 
-            elif i == 3: val = row["مستحق"]
+            elif i == 3: val = row["الكلي"] # تم التعديل لعرض الكلي بدلاً من مستحق
             elif i >= 4: val = "" # حقول السلات الـ 12 تبقى فارغة
                     
             format_cell_advanced(row_cells[i], val, size_pt=font_size, font_name="Calibri", color_rgb=None, align=cell_align)
@@ -443,11 +443,11 @@ def save_doc_buffer(doc, df):
         f"العدد الكلي للمستحقين = {total_eligible}\n"
         f"العدد الكلي للمحجوبين = {total_withheld}"
     )
-    stats_run = stats_p.add_run(stats_text)
-    stats_run.font.name = "Segoe UI Semibold"
-    stats_run.font.size = Pt(13)
-    stats_run.bold = True
-    stats_run.font.color.rgb = COLOR_NAVY_BLUE
+    stats_text_run = stats_p.add_run(stats_text)
+    stats_text_run.font.name = "Segoe UI Semibold"
+    stats_text_run.font.size = Pt(13)
+    stats_text_run.bold = True
+    stats_text_run.font.color.rgb = COLOR_NAVY_BLUE
 
     # الترقيم السفلي للصفحات
     footer = doc.sections[0].footer
@@ -496,7 +496,7 @@ with col2:
             "النموذج الأول (الأصلي المطور)", 
             "النموذج الثاني (حجم 14 وحقلين فارغين)",
             "النموذج الثالث (خط 16، عناوين 12، 4 أشهر)",
-            "النموذج الرابع (12 سلة، مستحق فقط)"
+            "النموذج الرابع (12 سلة، العدد الكلي)"
         ],
         index=0,
         horizontal=False
