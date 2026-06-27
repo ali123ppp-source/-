@@ -156,8 +156,7 @@ def build_professional_word_report(df, filename_base, card_choice):
         section.right_margin = Cm(0.3)
         
     clean_name = filename_base
-    words_to_remove = ["مستكشف", "معدل", "كشف", "منسق", "جاهز"]
-    for w in words_to_remove:
+    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز"]:
         clean_name = clean_name.replace(w, "")
     clean_name = re.sub(r'[a-zA-Z]', '', clean_name)
     clean_name = re.sub(r'[\-_+_.]', '', clean_name)
@@ -170,114 +169,106 @@ def build_professional_word_report(df, filename_base, card_choice):
     title_run.font.size = Pt(14)
     title_run.bold = True
     
-    footer = doc.sections[0].footer
-    footer_p = footer.paragraphs[0]
-    footer_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    f_run = footer_p.add_run("صفحة ")
-    f_run.font.size = Pt(10)
-    fldChar1 = parse_xml(f'<w:fldChar {nsdecls("w")} w:fldCharType="begin"/>')
-    instrText = parse_xml(f'<w:instrText {nsdecls("w")} xml:space="preserve"> PAGE </w:instrText>')
-    fldChar2 = parse_xml(f'<w:fldChar {nsdecls("w")} w:fldCharType="separate"/>')
-    fldChar3 = parse_xml(f'<w:fldChar {nsdecls("w")} w:fldCharType="end"/>')
-    f_run._r.extend([fldChar1, instrText, fldChar2, fldChar3])
-    
     headers = ["ت", "اسم رب الأسرة", "حقل فارغ", "الكلي", "مستحق", "محجوب", card_choice, "ملاحظات"]
-    
     table = doc.add_table(rows=1, cols=8)
     table.style = 'Table Grid'
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    
     set_table_borders(table, color_hex="2A4B7C")
-    
-    tblPr = table._tbl.tblPr
-    tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
-    
-    trPr = table.rows[0]._tr.get_or_add_trPr()
-    trPr.append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
+    table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
+    table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
     
     max_name_len = max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15)
     dynamic_name_width = Cm(max_name_len * 0.22 + 0.5)
-    
-    col_widths = [
-        Cm(0.9),              # ت
-        dynamic_name_width,   # اسم رب الأسرة
-        Cm(0.44),             # حقل فارغ
-        Cm(0.9),              # الكلي
-        Cm(0.9),              # مستحق
-        Cm(0.9),              # محجوب
-        Cm(3.0),              # رقم البطاقة 
-        Cm(2.19)              # ملاحظات 
-    ]
+    col_widths = [Cm(0.9), dynamic_name_width, Cm(0.44), Cm(0.9), Cm(0.9), Cm(0.9), Cm(3.0), Cm(2.19)]
     
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
     
-    hdr_cells = table.rows[0].cells
     for i, title in enumerate(headers):
-        hdr_cells[i].width = col_widths[i]
-        
+        table.rows[0].cells[i].width = col_widths[i]
         if i in [3, 4, 5]:
-            set_cell_vertical_text(hdr_cells[i])
-            format_cell_advanced(hdr_cells[i], title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="center", color_rgb=COLOR_NAVY_BLUE)
+            set_cell_vertical_text(table.rows[0].cells[i])
+            format_cell_advanced(table.rows[0].cells[i], title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="center", color_rgb=COLOR_NAVY_BLUE)
         else:
-            cell_align = "left" if i == 1 else "center"
-            format_cell_advanced(hdr_cells[i], title, bold=True, size_pt=14, font_name="Segoe UI Semibold", align=cell_align, color_rgb=COLOR_NAVY_BLUE)
+            format_cell_advanced(table.rows[0].cells[i], title, bold=True, size_pt=14, font_name="Segoe UI Semibold", align="left" if i==1 else "center", color_rgb=COLOR_NAVY_BLUE)
             
-    HEX_ELEGANT_BLUE = "D4E6F1"
-    HEX_LIGHT_BLUE = "EBF5FB"
-    HEX_LIGHT_RED = "FADBD8"
-    HEX_LIGHT_GREEN = "E8F8F5"
-    HEX_ALERT_RED = "EC7063"
-    
     for idx, row in df.iterrows():
         row_cells = table.add_row().cells
-        r_trPr = table.rows[idx+1]._tr.get_or_add_trPr()
-        r_trPr.append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
-        
+        table.rows[idx+1]._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
         is_eligible_zero = int(row["مستحق"]) == 0
-        for i in range(8):
-            row_cells[i].width = col_widths[i]
-            
         set_cell_no_wrap(row_cells[1])
         
         for i in range(8):
-            val = ""
-            text_color = None
-            cell_align = "center"
-            font_size = 16
+            row_cells[i].width = col_widths[i]
+            val = row["ت"] if i==0 else row["اسم رب الأسرة"] if i==1 else "x" if i==2 and is_eligible_zero else "" if i==2 else row["الكلي"] if i==3 else row["مستحق"] if i==4 else row["محجوب"] if i==5 else row["رقم البطاقة"] if i==6 else "محجوب" if i==7 and is_eligible_zero else ""
+            font_size = 14 if i==5 else 12 if i==7 and is_eligible_zero else 16
+            text_color = RGBColor(203, 67, 53) if i==7 and is_eligible_zero else None
+            format_cell_advanced(row_cells[i], val, size_pt=font_size, font_name="Calibri", color_rgb=text_color, align="left" if i==1 else "center")
             
-            if i == 0: val = row["ت"]
-            elif i == 1: 
-                val = row["اسم رب الأسرة"]
-                cell_align = "left" 
-            elif i == 2: val = "x" if is_eligible_zero else "" 
-            elif i == 3: val = row["الكلي"]
-            elif i == 4: val = row["مستحق"]
-            elif i == 5: 
-                val = row["محجوب"]
-                font_size = 14  
-            elif i == 6: val = row["رقم البطاقة"] 
-            elif i == 7: 
-                val = "محجوب" if is_eligible_zero else "" 
-                if is_eligible_zero:
-                    text_color = RGBColor(203, 67, 53)
-                    font_size = 12  
-                    
-            format_cell_advanced(row_cells[i], val, size_pt=font_size, font_name="Calibri", color_rgb=text_color, align=cell_align)
-            
-            if is_eligible_zero:
-                set_cell_background(row_cells[i], HEX_ALERT_RED)
+            if is_eligible_zero: set_cell_background(row_cells[i], "EC7063")
             else:
-                if i == 0: set_cell_background(row_cells[i], HEX_ELEGANT_BLUE)
-                elif i == 3: set_cell_background(row_cells[i], HEX_LIGHT_BLUE)   
-                elif i == 4: set_cell_background(row_cells[i], HEX_LIGHT_GREEN)  
-                elif i == 5: set_cell_background(row_cells[i], HEX_LIGHT_RED)    
-
+                if i==0: set_cell_background(row_cells[i], "D4E6F1")
+                elif i==3: set_cell_background(row_cells[i], "EBF5FB")
+                elif i==4: set_cell_background(row_cells[i], "E8F8F5")
+                elif i==5: set_cell_background(row_cells[i], "FADBD8")
     return save_doc_buffer(doc, df)
 
 # -----------------------------------------------------------------------------
-# محرك بناء تقرير Word - النموذج الثاني (مواصفات حجم 14 وحقلين فارغين ورصاصي)
+# محرك بناء تقرير Word - النموذج الثاني
 # -----------------------------------------------------------------------------
 def build_professional_word_report_v2(df, filename_base, card_choice):
+    doc = Document()
+    for section in doc.sections:
+        section.top_margin, section.bottom_margin, section.left_margin, section.right_margin = Cm(0.5), Cm(0.5), Cm(0.3), Cm(0.3)
+        
+    clean_name = filename_base
+    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز"]: clean_name = clean_name.replace(w, "")
+    clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', '', clean_name).split())
+    
+    title_p = doc.add_paragraph()
+    title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    title_run = title_p.add_run(f"الكشف الإحصائي المنسق للوكيل: {clean_name}")
+    title_run.font.name, title_run.font.size, title_run.bold = "Segoe UI Semibold", Pt(14), True
+    
+    headers = ["ت", "اسم رب الأسرة", "حقل فارغ 1", "حقل فارغ 2", "الكلي", "مستحق", "محجوب", card_choice, "ملاحظات"]
+    table = doc.add_table(rows=1, cols=9)
+    table.style, table.alignment = 'Table Grid', WD_TABLE_ALIGNMENT.CENTER
+    set_table_borders(table, "2A4B7C")
+    table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
+    table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
+    
+    dynamic_name_width = Cm(max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15) * 0.22 + 0.5)
+    col_widths = [Cm(0.9), dynamic_name_width, Cm(0.80), Cm(0.80), Cm(0.9), Cm(0.9), Cm(0.9), Cm(3.0), Cm(1.80)]
+    COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
+    
+    for i, title in enumerate(headers):
+        table.rows[0].cells[i].width = col_widths[i]
+        if i in [4, 5, 6]: set_cell_vertical_text(table.rows[0].cells[i])
+        format_cell_advanced(table.rows[0].cells[i], title, bold=True, size_pt=14, font_name="Segoe UI Semibold", align="left" if i==1 else "center", color_rgb=COLOR_NAVY_BLUE)
+            
+    for idx, row in df.iterrows():
+        row_cells = table.add_row().cells
+        table.rows[idx+1]._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
+        is_eligible_zero = int(row["مستحق"]) == 0
+        set_cell_no_wrap(row_cells[1])
+        
+        for i in range(9):
+            row_cells[i].width = col_widths[i]
+            val = row["ت"] if i==0 else row["اسم رب الأسرة"] if i==1 else "x" if i in [2,3] and is_eligible_zero else "" if i in [2,3] else row["الكلي"] if i==4 else row["مستحق"] if i==5 else row["محجوب"] if i==6 else row["رقم البطاقة"] if i==7 else "محجوب" if i==8 and is_eligible_zero else ""
+            text_color = RGBColor(203, 67, 53) if i==8 and is_eligible_zero else None
+            format_cell_advanced(row_cells[i], val, size_pt=14, font_name="Calibri", color_rgb=text_color, align="left" if i==1 else "center")
+            
+            if is_eligible_zero: set_cell_background(row_cells[i], "EC7063")
+            else:
+                if i==0: set_cell_background(row_cells[i], "D4E6F1")
+                elif i==4: set_cell_background(row_cells[i], "EBF5FB")
+                elif i==5: set_cell_background(row_cells[i], "E8F8F5")
+            if i==6: set_cell_background(row_cells[i], "E5E7E9")
+    return save_doc_buffer(doc, df)
+
+# -----------------------------------------------------------------------------
+# محرك بناء تقرير Word - النموذج الثالث (عناوين 12، تفاصيل 16، 4 أشهر)
+# -----------------------------------------------------------------------------
+def build_professional_word_report_v3(df, filename_base, card_choice):
     doc = Document()
     
     for section in doc.sections:
@@ -301,21 +292,10 @@ def build_professional_word_report_v2(df, filename_base, card_choice):
     title_run.font.size = Pt(14)
     title_run.bold = True
     
-    footer = doc.sections[0].footer
-    footer_p = footer.paragraphs[0]
-    footer_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    f_run = footer_p.add_run("صفحة ")
-    f_run.font.size = Pt(10)
-    fldChar1 = parse_xml(f'<w:fldChar {nsdecls("w")} w:fldCharType="begin"/>')
-    instrText = parse_xml(f'<w:instrText {nsdecls("w")} xml:space="preserve"> PAGE </w:instrText>')
-    fldChar2 = parse_xml(f'<w:fldChar {nsdecls("w")} w:fldCharType="separate"/>')
-    fldChar3 = parse_xml(f'<w:fldChar {nsdecls("w")} w:fldCharType="end"/>')
-    f_run._r.extend([fldChar1, instrText, fldChar2, fldChar3])
+    # 10 أعمدة بالترتيب المطلوب
+    headers = ["ت", "اسم رب الأسرة", card_choice, "الكلي", "مستحق", "محجوب", "الشهر الأول", "الشهر الثاني", "الشهر الثالث", "الشهر الرابع"]
     
-    # 9 أعمدة بسبب إضافة حقل فارغ إضافي جنب الحقل الفارغ
-    headers = ["ت", "اسم رب الأسرة", "حقل فارغ 1", "حقل فارغ 2", "الكلي", "مستحق", "محجوب", card_choice, "ملاحظات"]
-    
-    table = doc.add_table(rows=1, cols=9)
+    table = doc.add_table(rows=1, cols=10)
     table.style = 'Table Grid'
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     
@@ -330,17 +310,18 @@ def build_professional_word_report_v2(df, filename_base, card_choice):
     max_name_len = max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15)
     dynamic_name_width = Cm(max_name_len * 0.22 + 0.5)
     
-    # توزيع المقاسات الصارمة الجديدة للقالب الثاني
+    # توزيع المقاسات للنموذج الثالث (الحقول 4 الأخيرة متساوية لتملأ الفراغ)
     col_widths = [
         Cm(0.9),              # ت
         dynamic_name_width,   # اسم رب الأسرة
-        Cm(0.80),             # حقل فارغ 1
-        Cm(0.80),             # حقل فارغ 2
+        Cm(3.0),              # رقم البطاقة
         Cm(0.9),              # الكلي
         Cm(0.9),              # مستحق
         Cm(0.9),              # محجوب
-        Cm(3.0),              # رقم البطاقة
-        Cm(1.80)              # ملاحظات المحدث
+        Cm(2.3),              # الشهر الأول
+        Cm(2.3),              # الشهر الثاني
+        Cm(2.3),              # الشهر الثالث
+        Cm(2.3)               # الشهر الرابع
     ]
     
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
@@ -349,18 +330,17 @@ def build_professional_word_report_v2(df, filename_base, card_choice):
     for i, title in enumerate(headers):
         hdr_cells[i].width = col_widths[i]
         
-        # حقول الأرقام زُحزحت للمؤشرات (4، 5، 6) بسبب الحقل الفارغ الإضافي
-        if i in [4, 5, 6]:
+        # الكلي ومستحق ومحجوب بشكل عمودي لتوفير المساحة
+        if i in [3, 4, 5]:
             set_cell_vertical_text(hdr_cells[i])
-            format_cell_advanced(hdr_cells[i], title, bold=True, size_pt=14, font_name="Segoe UI Semibold", align="center", color_rgb=COLOR_NAVY_BLUE)
-        else:
-            cell_align = "left" if i == 1 else "center"
-            format_cell_advanced(hdr_cells[i], title, bold=True, size_pt=14, font_name="Segoe UI Semibold", align=cell_align, color_rgb=COLOR_NAVY_BLUE)
+        
+        cell_align = "left" if i == 1 else "center"
+        # حجم الخط للعناوين 12 بصرامة
+        format_cell_advanced(hdr_cells[i], title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align=cell_align, color_rgb=COLOR_NAVY_BLUE)
             
     HEX_ELEGANT_BLUE = "D4E6F1"
-    HEX_LIGHT_BLUE = "EBF5FB"
-    HEX_LIGHT_GREEN = "E8F8F5"
-    HEX_LIGHT_GRAY = "E5E7E9"   # لون رصاصي فاتح لعمود المحجوبين بالكامل
+    HEX_LIGHT_GRAY = "E5E7E9"    # الكلي رصاصي فاتح
+    HEX_LIGHT_YELLOW = "FCF3CF"  # محجوب أصفر فاتح
     HEX_ALERT_RED = "EC7063"
     
     for idx, row in df.iterrows():
@@ -369,48 +349,43 @@ def build_professional_word_report_v2(df, filename_base, card_choice):
         r_trPr.append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
         
         is_eligible_zero = int(row["مستحق"]) == 0
-        for i in range(9):
-            row_cells[i].width = col_widths[i]
-            
+        
         set_cell_no_wrap(row_cells[1])
         
-        for i in range(9):
+        for i in range(10):
+            row_cells[i].width = col_widths[i]
+            
             val = ""
-            text_color = None
             cell_align = "center"
-            font_size = 14  # حجم الخط للجميع 14 بصرامة
+            font_size = 16  # حجم الخط لباقي التفاصيل 16 بصرامة
             
             if i == 0: val = row["ت"]
             elif i == 1: 
                 val = row["اسم رب الأسرة"]
                 cell_align = "left" 
-            elif i == 2: val = "x" if is_eligible_zero else "" 
-            elif i == 3: val = "x" if is_eligible_zero else "" 
-            elif i == 4: val = row["الكلي"]
-            elif i == 5: val = row["مستحق"]
-            elif i == 6: val = row["محجوب"]
-            elif i == 7: val = row["رقم البطاقة"]
-            elif i == 8: 
-                val = "محجوب" if is_eligible_zero else "" 
-                if is_eligible_zero:
-                    text_color = RGBColor(203, 67, 53)
+            elif i == 2: val = row["رقم البطاقة"]
+            elif i == 3: val = row["الكلي"]
+            elif i == 4: val = row["مستحق"]
+            elif i == 5: val = row["محجوب"]
+            elif i in [6, 7, 8, 9]: val = "" # حقول الأشهر تبقى فارغة
                     
-            format_cell_advanced(row_cells[i], val, size_pt=font_size, font_name="Calibri", color_rgb=text_color, align=cell_align)
+            format_cell_advanced(row_cells[i], val, size_pt=font_size, font_name="Calibri", color_rgb=None, align=cell_align)
             
+            # تلوين الخلفيات حسب الطلب الصارم
             if is_eligible_zero:
                 set_cell_background(row_cells[i], HEX_ALERT_RED)
             else:
                 if i == 0: set_cell_background(row_cells[i], HEX_ELEGANT_BLUE)
-                elif i == 4: set_cell_background(row_cells[i], HEX_LIGHT_BLUE)   
-                elif i == 5: set_cell_background(row_cells[i], HEX_LIGHT_GREEN)  
             
-            # تضليل عمود المحجوبين كاملة بلون رصاصي فاتح بصرامة (المؤشر رقم 6)
-            if i == 6:
+            # تظليل عامود الكلي بالرصاصي وعامود المحجوب بالأصفر (يطبق دائماً كما طلبت)
+            if i == 3:
                 set_cell_background(row_cells[i], HEX_LIGHT_GRAY)
+            if i == 5:
+                set_cell_background(row_cells[i], HEX_LIGHT_YELLOW)
 
     return save_doc_buffer(doc, df)
 
-# دالة لحفظ وعرض الإحصائيات تحت الجدول
+# دالة لحفظ وعرض الإحصائيات المشتركة تحت الجدول
 def save_doc_buffer(doc, df):
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
     total_all = df["الكلي"].astype(int).sum()
@@ -433,6 +408,23 @@ def save_doc_buffer(doc, df):
     stats_run.bold = True
     stats_run.font.color.rgb = COLOR_NAVY_BLUE
 
+    # الترقيم السفلي للصفحات
+    footer = doc.sections[0].footer
+    if len(footer.paragraphs) == 0:
+        footer_p = footer.add_paragraph()
+    else:
+        footer_p = footer.paragraphs[0]
+    footer_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    footer_p.clear()
+    f_run = footer_p.add_run("صفحة ")
+    f_run.font.size = Pt(10)
+    f_run._r.extend([
+        parse_xml(f'<w:fldChar {nsdecls("w")} w:fldCharType="begin"/>'),
+        parse_xml(f'<w:instrText {nsdecls("w")} xml:space="preserve"> PAGE </w:instrText>'),
+        parse_xml(f'<w:fldChar {nsdecls("w")} w:fldCharType="separate"/>'),
+        parse_xml(f'<w:fldChar {nsdecls("w")} w:fldCharType="end"/>')
+    ])
+
     buffer = BytesIO()
     doc.save(buffer)
     buffer.seek(0)
@@ -446,22 +438,26 @@ uploaded_file = st.file_uploader("ارفع كشف الوكلاء", type=['docx']
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-col1, col2 = st.columns(2)
+col1, col2 = st.columns([1, 2])
 
 with col1:
     selected_card = st.radio(
-        "📄 اختر نوع رقم البطاقة المراد اعتماده:",
+        "📄 اختر نوع رقم البطاقة:",
         ["رقم البطاقة القديم", "رقم البطاقة الحديث"],
         index=0,
-        horizontal=True
+        horizontal=False
     )
 
 with col2:
     template_choice = st.radio(
         "🎨 اختر نموذج قالب الـ Word المطلوب:",
-        ["النموذج الأول (الأصلي المطور)", "النموذج الثاني (حجم 14 وحقلين فارغين)"],
+        [
+            "النموذج الأول (الأصلي المطور)", 
+            "النموذج الثاني (حجم 14 وحقلين فارغين)",
+            "النموذج الثالث (خط 16، عناوين 12، 4 أشهر)"
+        ],
         index=0,
-        horizontal=True
+        horizontal=False
     )
 
 st.markdown("<br>", unsafe_allow_html=True)
@@ -502,8 +498,10 @@ if st.session_state.processing_done:
     with st.spinner('جاري صياغة وهيكلة مستند Word المطور المختار...'):
         if used_template == "النموذج الأول (الأصلي المطور)":
             word_output = build_professional_word_report(df_final, output_filename, used_card_type)
-        else:
+        elif used_template == "النموذج الثاني (حجم 14 وحقلين فارغين)":
             word_output = build_professional_word_report_v2(df_final, output_filename, used_card_type)
+        else:
+            word_output = build_professional_word_report_v3(df_final, output_filename, used_card_type)
         
     st.download_button(
         label="📥 تحميل كشف الوكلاء المنسق والجاهز للطباعة فوراً (Word)",
