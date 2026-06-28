@@ -10,14 +10,13 @@ from docx.oxml.ns import nsdecls, qn
 import re
 
 # -----------------------------------------------------------------------------
-# إعدادات الواجهة (The Console)
+# إعدادات الواجهة
 # -----------------------------------------------------------------------------
 st.set_page_config(page_title="نظام كشوفات الوكلاء الخارق", layout="wide")
 st.markdown("""
     <style>
     th, td { text-align: right !important; dir: rtl !important; }
-    div.stButton > button { background-color: #1A5276; color: white; width: 100%; font-weight: bold; border-radius: 8px; font-size: 18px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);}
-    div.stButton > button:hover { background-color: #154360; border-color: #F1C40F; color: #F1C40F;}
+    div.stButton > button { background-color: #1A5276; color: white; width: 100%; font-weight: bold; border-radius: 8px; font-size: 18px;}
     .report-box { background-color: #F4F6F7; padding: 15px; border-radius: 8px; border-right: 5px solid #1A5276; text-align: right; margin-bottom: 10px;}
     div.row-widget.stRadio > div { flex-direction: row-reverse; justify-content: flex-start; gap: 20px; }
     </style>
@@ -31,10 +30,9 @@ if "processing_done" not in st.session_state:
     st.session_state.df_duplicates = None
     st.session_state.output_filename = ""
     st.session_state.selected_card = ""
-    st.session_state.total_scanned = 0
 
 # -----------------------------------------------------------------------------
-# دوال التنسيق المتقدمة لـ Word (The Forges)
+# دوال التنسيق المتقدمة لـ Word
 # -----------------------------------------------------------------------------
 def set_table_borders(table, color_hex="1A5276"):
     tblPr = table._tbl.tblPr
@@ -86,105 +84,92 @@ def format_cell_advanced(cell, text, bold=False, color_rgb=None, size_pt=16, fon
         run.font.size = Pt(size_pt)
 
 # -----------------------------------------------------------------------------
-# المحرك الخارق: خوارزمية الرياضيات الموجهة (Directional Math AI)
+# المحرك الجبري: الاستخراج الكلي غير المشروط (Unconditional Parsing)
 # -----------------------------------------------------------------------------
 def extract_and_clean_data(file_obj, card_choice):
     doc = Document(file_obj)
     raw_records = []
     
-    # 1. التجميع الشامل (حصد كل نصوص المستند وتدمير الجداول الوهمية)
     lines = []
-    for para in doc.paragraphs:
-        if para.text.strip(): lines.append(para.text.strip())
-            
+    
+    # تحطيم الجداول مع بناء جدران عازلة لمنع التصاق الأسماء بالأرقام
     for table in doc.tables:
         for row in table.rows:
-            # دمج الخلايا أفقياً لسحق تشوهات المطبعة
-            cells_text = [re.sub(r'\s+', ' ', cell.text.strip()) for cell in row.cells if cell.text.strip()]
-            lines.append(" ".join(cells_text))
+            cells = [c.text.replace('\n', ' ').strip() for c in row.cells if c.text.strip()]
+            lines.append(" | ".join(cells))
             
-    total_scanned_counter = 0
-
-    # 2. الاختراق اللغوي والرياضي
+    for para in doc.paragraphs:
+        if para.text.strip() and "|" not in para.text:
+            lines.append(para.text.strip())
+            
     for line in lines:
-        # توحيد الرموز الغريبة
-        line_clean = re.sub(r'[،,\-\_]', ' ', line)
-        line_clean = re.sub(r'\s+', ' ', line_clean).strip()
-        
+        line_clean = line.replace(',', ' ').replace('،', ' ').replace('-', ' ')
         if not line_clean: continue
         
-        # تخطي الترويسات التي تخدع الكود
-        if any(w in line_clean for w in ["المركز", "نوع الوكالة", "الافراد الكلية", "اسم رب", "رقم البطاقة"]): continue
-        
-        # أ- صيد الاسم (أقوى رادار للأسماء العربية)
-        arabic_words = re.findall(r'[\u0600-\u06FF]{2,}', line_clean)
-        stop_words = ["ملاحظات", "الوكيل", "الافراد", "المحجوبين", "المستحقة", "رقم", "البطاقة", "القديم", "الحديث", "ت", "حقل", "فارغ"]
-        name_candidates = [w for w in arabic_words if w not in stop_words]
-        
-        if len(name_candidates) < 2: continue # يجب أن يكون الاسم مقطعين على الأقل
+        # تخطي الترويسات والنفايات
+        if any(w in line_clean for w in ["المركز", "اسم رب", "ملاحظات", "الوكيل", "الافراد", "الكلية", "المحجوبين", "FOOD", "نوع الوكالة"]):
+            continue
             
-        # حماية الهوية العراقية (عبد، أبو، الـ)
-        prefixes = ["عبد", "ابو", "أبو", "ام", "أم", "آل", "ال", "بني", "ذو"]
-        final_parts = []
-        real_words = 0
-        for p in name_candidates:
-            final_parts.append(p)
-            if p not in prefixes: real_words += 1
-            if real_words >= 4: break # نأخذ 4 مقاطع لضمان الأسماء الطويلة
-        three_part_name = " ".join(final_parts)
-        
-        # ب- فصل الأرقام عن النص
-        line_without_name = line_clean
-        for word in name_candidates:
-            line_without_name = line_without_name.replace(word, ' ')
+        # 1. الاستخراج الجبري للاسم (بدون قص، وبدون التباس مع الأرقام)
+        text_only = re.sub(r'[^\u0600-\u06FF\s\|]', ' ', line_clean)
+        segments = [s.strip() for s in text_only.split('|')]
+        if len(segments) <= 1:
+            segments = [s.strip() for s in text_only.split('  ')]
             
-        all_nums = [int(n) for n in re.findall(r'\d+', line_without_name)]
-        
-        cards = [n for n in all_nums if n > 10000]
-        smalls = [n for n in all_nums if n < 100] # العوائل والتسلسلات
-        
-        if not cards: 
-            selected_card = "غير متوفر" 
-        else:
-            old_card = str(cards[0])
-            new_card = str(cards[-1]) if len(cards) >= 2 else old_card
-            selected_card = new_card if card_choice == "رقم البطاقة الحديث" else old_card
-        
-        # ج- الرياضيات الموجهة (Directional Math Algorithm)
-        total = eligible = withheld = 0
-        found_math = False
-        
-        # نبحث في كل 3 أرقام متجاورة عن معادلة منطقية
-        for i in range(len(smalls) - 2):
-            window = smalls[i:i+3]
-            a, b, c = window
-            
-            # النسق الأول (كلي، مستحق، محجوب) -> أ = ب + ج
-            if a == b + c:
-                total, eligible, withheld = a, b, c
-                found_math = True; break
-            
-            # النسق الثاني (محجوب، مستحق، كلي) -> ج = أ + ب
-            elif c == a + b:
-                total, eligible, withheld = c, b, a
-                found_math = True; break
+        valid_names = []
+        for s in segments:
+            s_clean = re.sub(r'\s+', ' ', s).strip()
+            if len(s_clean.split()) >= 2:
+                valid_names.append(s_clean)
                 
-        # وضع طوارئ (إذا كان المحجوب 0 أحياناً لا يكتبونه)
-        if not found_math and len(smalls) >= 2:
-            safe_smalls = [n for n in smalls if n <= 20] # تجنب أرقام التسلسل الكبيرة
-            if len(safe_smalls) >= 2:
-                total = max(safe_smalls)
-                safe_smalls.remove(total)
-                eligible = max(safe_smalls)
-                withheld = total - eligible
-            elif len(safe_smalls) == 1:
-                total = eligible = safe_smalls[0]
-                withheld = 0
-
-        total_scanned_counter += 1
-
+        if not valid_names:
+            # صائد الطوارئ
+            fallback = re.findall(r'[\u0600-\u06FF]{2,}(?:\s+[\u0600-\u06FF]{2,})+', line_clean)
+            if fallback: valid_names = fallback
+            else: continue
+                
+        full_name = max(valid_names, key=len).strip()
+        
+        # 2. استخراج الأرقام البطاقات الصافية
+        all_nums = re.findall(r'\d+', line_clean)
+        cards = [n for n in all_nums if len(n) >= 5]
+        
+        old_card = str(cards[0]) if cards else "غير متوفر"
+        new_card = str(cards[-1]) if len(cards) >= 2 else old_card
+        selected_card = new_card if card_choice == "رقم البطاقة الحديث" else old_card
+        
+        # 3. تحديد الأرقام الصغيرة هندسياً (التموضع المطلق)
+        # البحث عن موقع الاسم لفصل ما قبله وما بعده
+        idx = line_clean.find(full_name.split()[0])
+        str_before = line_clean[:idx]
+        str_after = line_clean[idx:]
+        
+        smalls_before = [int(n) for n in re.findall(r'\d+', str_before) if len(n) < 5]
+        smalls_after = [int(n) for n in re.findall(r'\d+', str_after) if len(n) < 5]
+        
+        total = eligible = withheld = 0
+        
+        # لا نجمع، نأخذ الأرقام من مواقعها الطبيعية كما طُبعت
+        if len(smalls_after) >= 3:
+            total, eligible, withheld = smalls_after[0], smalls_after[1], smalls_after[2]
+        elif len(smalls_before) >= 3:
+            withheld, eligible, total = smalls_before[-3], smalls_before[-2], smalls_before[-1]
+        elif len(smalls_after) == 2:
+            total, eligible = smalls_after[0], smalls_after[1]
+            withheld = 0
+        elif len(smalls_before) == 2:
+            eligible, total = smalls_before[-2], smalls_before[-1]
+            withheld = 0
+        else:
+            # وضع النجاة الأخير
+            all_smalls = smalls_before + smalls_after
+            if len(all_smalls) >= 3:
+                total, eligible, withheld = all_smalls[-3], all_smalls[-2], all_smalls[-1]
+            elif len(all_smalls) == 2:
+                total, eligible, withheld = max(all_smalls), min(all_smalls), 0
+                
         raw_records.append({
-            "اسم رب الأسرة": three_part_name,
+            "اسم رب الأسرة": full_name,
             "رقم البطاقة": selected_card,
             "الكلي": total,
             "محجوب": withheld,
@@ -195,23 +180,25 @@ def extract_and_clean_data(file_obj, card_choice):
     df_duplicates = pd.DataFrame()
     
     if not df.empty:
-        # 1. استخراج المتكررات الحرفية وإرسالها للسجن (ملف العزل)
-        duplicate_mask = df.duplicated(subset=["اسم رب الأسرة", "رقم البطاقة"], keep='first')
+        # الحل الجوهري العظيم: 
+        # الحذف يحدث فقط إذا كان السطر متطابقاً بنسبة 100% في جميع الخانات
+        # مما يحمي العوائل التي تتشابه أسماؤها أو تفتقد لأرقام بطاقاتها
+        duplicate_mask = df.duplicated(keep='first')
         df_duplicates = df[duplicate_mask].copy()
         
         if not df_duplicates.empty:
             df_duplicates = df_duplicates.sort_values(by="اسم رب الأسرة").reset_index(drop=True)
             df_duplicates.insert(0, "ت", df_duplicates.index + 1)
 
-        # 2. تنقية الكشف الأصلي من التكرار وإعداده للطباعة
-        df = df.drop_duplicates(subset=["اسم رب الأسرة", "رقم البطاقة"], keep='first')
+        # الكشف النهائي المعقم
+        df = df.drop_duplicates(keep='first')
         df = df.sort_values(by="اسم رب الأسرة").reset_index(drop=True)
         df.insert(0, "ت", df.index + 1)
         
-    return df, df_duplicates, total_scanned_counter
+    return df, df_duplicates, len(raw_records)
 
 # -----------------------------------------------------------------------------
-# محرك بناء تقرير Word (The Document Forge)
+# محرك بناء تقرير Word
 # -----------------------------------------------------------------------------
 def build_professional_word_report(df, filename_base, card_choice, is_duplicate_report=False):
     doc = Document()
@@ -223,25 +210,20 @@ def build_professional_word_report(df, filename_base, card_choice, is_duplicate_
         section.right_margin = Cm(0.3)
         
     clean_name = filename_base
-    words_to_remove = ["مستكشف", "معدل", "كشف", "منسق", "جاهز"]
-    for w in words_to_remove: clean_name = clean_name.replace(w, "")
+    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز"]: clean_name = clean_name.replace(w, "")
     clean_name = re.sub(r'[a-zA-Z]', '', clean_name)
     clean_name = re.sub(r'[\-_+_.]', '', clean_name)
     clean_name = " ".join(clean_name.split())
     
     title_p = doc.add_paragraph()
     title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    
     report_title = f"كشف المتكررات المعزولة: {clean_name}" if is_duplicate_report else f"الكشف الإحصائي المنسق للوكيل: {clean_name}"
     
     title_run = title_p.add_run(report_title)
     title_run.font.name = "Segoe UI Semibold"
     title_run.font.size = Pt(14)
     title_run.bold = True
-    if is_duplicate_report:
-        title_run.font.color.rgb = RGBColor(220, 20, 60) # أحمر للمتكررات
-    else:
-        title_run.font.color.rgb = RGBColor(26, 82, 118)
+    title_run.font.color.rgb = RGBColor(220, 20, 60) if is_duplicate_report else RGBColor(26, 82, 118)
     
     footer = doc.sections[0].footer
     footer_p = footer.paragraphs[0]
@@ -255,7 +237,6 @@ def build_professional_word_report(df, filename_base, card_choice, is_duplicate_
     f_run._r.extend([fldChar1, instrText, fldChar2, fldChar3])
     
     headers = ["ت", "اسم رب الأسرة", "حقل فارغ", "الكلي", "مستحق", "محجوب", card_choice, "ملاحظات"]
-    
     table = doc.add_table(rows=1, cols=8)
     table.style = 'Table Grid'
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -265,7 +246,6 @@ def build_professional_word_report(df, filename_base, card_choice, is_duplicate_
     
     tblPr = table._tbl.tblPr
     tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
-    
     trPr = table.rows[0]._tr.get_or_add_trPr()
     trPr.append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
     
@@ -354,9 +334,9 @@ def build_professional_word_report(df, filename_base, card_choice, is_duplicate_
     return buffer
 
 # -----------------------------------------------------------------------------
-# قمرة القيادة (Streamlit Console)
+# قمرة القيادة (Streamlit)
 # -----------------------------------------------------------------------------
-st.markdown("<h3 style='text-align: right;'>📂 رفع الكشف المراد تدقيقه واختراقه</h3>", unsafe_allow_html=True)
+st.markdown("<h3 style='text-align: right;'>📂 رفع الكشف المراد تدقيقه واختراقه بالكامل</h3>", unsafe_allow_html=True)
 uploaded_file = st.file_uploader("ارفع كشف الوكلاء", type=['docx'], key="doc_input_master", label_visibility="collapsed")
 
 st.markdown("<br>", unsafe_allow_html=True)
@@ -368,9 +348,9 @@ if uploaded_file:
     if st.session_state.output_filename != current_filename or st.session_state.selected_card != selected_card:
         st.session_state.processing_done = False
 
-if st.button("🚀 إطلاق محرك الرياضيات الموجهة (حصد كل البيانات)"):
+if st.button("🚀 إطلاق محرك الاستخراج الكلي (Unconditional Parsing)"):
     if uploaded_file:
-        with st.spinner('يتم الآن سحق الجداول وتحليل الشيفرات بالذكاء الرياضي الباليستي...'):
+        with st.spinner('يتم الآن سحق الجداول وتحليل الشيفرات بدون أي شروط رياضية...'):
             try:
                 df_res, df_dup, total_scanned = extract_and_clean_data(uploaded_file, selected_card)
                 if not df_res.empty:
@@ -390,14 +370,12 @@ if st.button("🚀 إطلاق محرك الرياضيات الموجهة (حصد
 if st.session_state.processing_done:
     df_final = st.session_state.df_final
     df_duplicates = st.session_state.df_duplicates
-    total_found = st.session_state.total_scanned
     output_filename = st.session_state.output_filename
     used_card_type = st.session_state.selected_card
     
     st.balloons()
-    st.success(f"🏆 المهمة أُنجزت بقوة ساحقة! المحرك الخفي قام بمسح ({total_found}) قيد من أعماق الملف الممزق.\nبعد تدمير التكرارات، صفا لك ({len(df_final)}) قيد اسم صافٍ ونقي!")
+    st.success(f"🏆 المهمة أُنجزت! تم استخراج عدد ({len(df_final)}) قيد صافٍ بشكل كامل ومطلق.")
     
-    # تحميل الكشف النظيف
     with st.spinner('جاري صياغة الكشف الذهبي الأساسي...'):
         word_output = build_professional_word_report(df_final, output_filename, used_card_type, is_duplicate_report=False)
         
@@ -408,14 +386,13 @@ if st.session_state.processing_done:
         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
     
-    # تحميل كشف العزل للمتكررات
     if not df_duplicates.empty:
-        st.warning(f"⚠️ لقد كشفنا المستور! تم اصطياد وعزل ({len(df_duplicates)}) قيد متكرر كان يختبئ في الملف.")
-        with st.spinner('جاري بناء سجن المتكررات...'):
+        st.warning(f"⚠️ تم عزل ({len(df_duplicates)}) قيد كـ (نسخ ولصق حرفي 100%).")
+        with st.spinner('جاري بناء ملف التكرارات...'):
             word_output_dup = build_professional_word_report(df_duplicates, output_filename, used_card_type, is_duplicate_report=True)
             
         st.download_button(
-            label="🚨 تحميل ملف القيود المتكررة المعزولة (للتدقيق)",
+            label="🚨 تحميل ملف القيود المتكررة المعزولة",
             data=word_output_dup,
             file_name=f"سجلات_متكررة_معزولة_{output_filename}.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
