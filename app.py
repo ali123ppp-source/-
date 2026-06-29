@@ -88,7 +88,7 @@ def format_cell_advanced(cell, text, bold=False, color_rgb=None, size_pt=16, fon
         run.font.size = Pt(size_pt)
 
 # -----------------------------------------------------------------------------
-# محرك قراءة وتنظيف البيانات الذكي والمدرع (المحدث)
+# محرك قراءة وتنظيف البيانات الذكي والمدرع (المحدث نهائياً)
 # -----------------------------------------------------------------------------
 def extract_and_clean_data(file_obj, card_choice):
     doc = Document(file_obj)
@@ -99,11 +99,12 @@ def extract_and_clean_data(file_obj, card_choice):
             cells = [cell.text.strip().replace('\n', ' ') for cell in row.cells]
             row_text = "".join(cells)
             
-            # تخطي الترويسات والعناوين
-            if not row_text or "المركز" in row_text or "الوكيل" in row_text or "اسم رب" in row_text or "الافراد" in row_text:
+            # تخطي الترويسات والعناوين بذكاء دون إسقاط أسماء المواطنين
+            # تم إزالة كلمة "المركز" و "الوكيل" و "الافراد" من شروط الحذف العشوائي
+            if not any(cells) or "الافراد المحجوبين" in row_text or "اسم رب الاسرة" in row_text or "اسم رب الأسرة" in row_text or "رقم الوكالة" in row_text or "اسم الوكيل" in row_text:
                 continue
             
-            # 1. إيجاد حقل الاسم بناءً على كثافة الحروف العربية (لتفادي الأخطاء المطبعية والأرقام بالاسم)
+            # 1. إيجاد حقل الاسم بناءً على كثافة الحروف العربية
             name_idx = -1
             max_len = 0
             for i, c in enumerate(cells):
@@ -136,7 +137,7 @@ def extract_and_clean_data(file_obj, card_choice):
             for i in range(name_idx + 1, len(cells)):
                 c_clean = cells[i].replace(' ', '').replace('-', '')
                 digits_only = ''.join(filter(str.isdigit, c_clean))
-                if len(digits_only) >= 2: # يكفي أن يحتوي رقمين ليعتبر بطاقة أو إدخال
+                if len(digits_only) >= 2:
                     card_nums.append(c_clean)
             
             if total == 0 and eligible == 0 and withheld == 0 and not card_nums:
@@ -348,7 +349,7 @@ def build_professional_word_report_v3(df, filename_base, card_choice):
     return save_doc_buffer(doc, df)
 
 # -----------------------------------------------------------------------------
-# محرك بناء تقرير Word - النموذج الرابع (12 سلة، العدد الكلي للأفراد)
+# محرك بناء تقرير Word - النموذج الرابع
 # -----------------------------------------------------------------------------
 def build_professional_word_report_v4(df, filename_base, card_choice):
     doc = Document()
