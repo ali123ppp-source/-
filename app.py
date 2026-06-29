@@ -88,7 +88,7 @@ def format_cell_advanced(cell, text, bold=False, color_rgb=None, size_pt=16, fon
         run.font.size = Pt(size_pt)
 
 # -----------------------------------------------------------------------------
-# محرك قراءة وتنظيف البيانات
+# محرك قراءة وتنظيف البيانات الذكي (النسخة المحدثة ضد الأخطاء المطبعية)
 # -----------------------------------------------------------------------------
 def extract_and_clean_data(file_obj, card_choice):
     doc = Document(file_obj)
@@ -100,31 +100,48 @@ def extract_and_clean_data(file_obj, card_choice):
             if not any(cells) or "المركز" in "".join(cells) or "الوكيل" in "".join(cells) or "اسم رب" in "".join(cells):
                 continue
             
+            # 1. إيجاد حقل الاسم بناءً على كثافة النص العربي (لنتفادى الأرقام المكتوبة بالخطأ في الاسم)
             name_idx = -1
             max_len = 0
             for i, c in enumerate(cells):
-                if any('\u0600' <= char <= '\u06FF' for char in c) and not any(char.isdigit() for char in c):
-                    if len(c) > max_len:
-                        max_len = len(c)
-                        name_idx = i
-            if name_idx == -1: continue
+                arabic_count = sum(1 for char in c if '\u0600' <= char <= '\u06FF')
+                if arabic_count > max_len:
+                    # تفادي اختيار حقل الملاحظات في نهاية الجدول إذا كان طويلاً
+                    if name_idx != -1 and i >= len(cells) - 2:
+                        continue
+                    max_len = arabic_count
+                    name_idx = i
             
-            card_indices = [i for i, c in enumerate(cells) if c.isdigit() and len(c) >= 5]
-            if not card_indices: continue
+            if name_idx == -1 or max_len < 3: 
+                continue
             
-            old_card_num = cells[card_indices[0]]
-            new_card_num = cells[card_indices[1]] if len(card_indices) > 1 else old_card_num
+            # 2. إيجاد أرقام البطاقات من الخلايا التي تأتي بعد حقل الاسم
+            card_nums = []
+            for i in range(name_idx + 1, len(cells)):
+                clean_c = ''.join(filter(str.isdigit, cells[i]))
+                if len(clean_c) >= 5:
+                    card_nums.append(clean_c)
+            
+            if not card_nums: 
+                continue
+            
+            old_card_num = card_nums[0]
+            new_card_num = card_nums[1] if len(card_nums) > 1 else old_card_num
             selected_card_num = new_card_num if card_choice == "رقم البطاقة الحديث" else old_card_num
             
-            digit_cells = [int(cells[i]) for i in range(name_idx) if cells[i].isdigit()]
-            if len(digit_cells) >= 3:
-                withheld, eligible, total = digit_cells[0], digit_cells[1], digit_cells[2]
-            elif len(digit_cells) == 2:
-                withheld, eligible, total = 0, digit_cells[0], digit_cells[1]
+            # 3. إستخراج الأرقام الإحصائية قبل حقل الاسم وتجاهل الخلايا الفارغة أو المسافات
+            def parse_int(val):
+                nums = ''.join(filter(str.isdigit, val))
+                return int(nums) if nums else 0
+
+            if name_idx >= 2:
+                total = parse_int(cells[name_idx - 1])
+                eligible = parse_int(cells[name_idx - 2])
+                withheld = parse_int(cells[name_idx - 3]) if name_idx >= 3 else 0
             else:
                 continue
             
-            # قص اللقب والإبقاء على الاسم الثلاثي فقط بصرامة
+            # قص اللقب والإبقاء على الاسم الثلاثي فقط
             full_name = cells[name_idx]
             name_parts = full_name.split()
             three_part_name = " ".join(name_parts[:3])
@@ -322,7 +339,7 @@ def build_professional_word_report_v3(df, filename_base, card_choice):
     return save_doc_buffer(doc, df)
 
 # -----------------------------------------------------------------------------
-# محرك بناء تقرير Word - النموذج الرابع (12 سلة، مستحق فقط)
+# محرك بناء تقرير Word - النموذج الرابع (12 سلة، التعديل: العدد الكلي للأفراد)
 # -----------------------------------------------------------------------------
 def build_professional_word_report_v4(df, filename_base, card_choice):
     doc = Document()
@@ -348,8 +365,7 @@ def build_professional_word_report_v4(df, filename_base, card_choice):
     title_run.font.size = Pt(14)
     title_run.bold = True
     
-    # 16 عمود بالترتيب المطلوب
-    headers = ["ت", card_choice, "اسم المواطن", "المستحق"] + [f"سلة {i}" for i in range(1, 13)]
+    headers = ["ت", card_choice, "اسم المواطن", "العدد الكلي"] + [f"سلة {i}" for i in range(1, 13)]
     
     table = doc.add_table(rows=1, cols=16)
     table.style = 'Table Grid'
@@ -366,12 +382,11 @@ def build_professional_word_report_v4(df, filename_base, card_choice):
     max_name_len = max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15)
     dynamic_name_width = Cm(max_name_len * 0.22 + 0.5)
     
-    # توزيع المقاسات للنموذج الرابع (12 سلة تملأ الورقة بأحجام متساوية)
     col_widths = [
         Cm(0.9),              # ت
         Cm(2.5),              # رقم البطاقة
         dynamic_name_width,   # اسم المواطن
-        Cm(0.9)               # المستحق
+        Cm(0.9)               # العدد الكلي
     ] + [Cm(1.05)] * 12       # 12 سلة بأحجام متساوية 
     
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
@@ -380,7 +395,6 @@ def build_professional_word_report_v4(df, filename_base, card_choice):
     for i, title in enumerate(headers):
         hdr_cells[i].width = col_widths[i]
         
-        # جعل النصوص عمودية للأعمدة الضيقة من المستحق إلى آخر سلة لتوفير مساحة
         if i >= 3:
             set_cell_vertical_text(hdr_cells[i])
         
@@ -405,19 +419,18 @@ def build_professional_word_report_v4(df, filename_base, card_choice):
             
             val = ""
             cell_align = "center"
-            font_size = 14  # حجم خط 14 ليتناسب مع 16 عمود
+            font_size = 14  
             
             if i == 0: val = row["ت"]
             elif i == 1: val = row["رقم البطاقة"]
             elif i == 2: 
                 val = row["اسم رب الأسرة"]
                 cell_align = "left" 
-            elif i == 3: val = row["مستحق"]
-            elif i >= 4: val = "" # حقول السلات الـ 12 تبقى فارغة
+            elif i == 3: val = row["الكلي"] 
+            elif i >= 4: val = "" 
                     
             format_cell_advanced(row_cells[i], val, size_pt=font_size, font_name="Calibri", color_rgb=None, align=cell_align)
             
-            # التنسيق اللوني
             if is_eligible_zero:
                 set_cell_background(row_cells[i], HEX_ALERT_RED)
             else:
@@ -443,13 +456,12 @@ def save_doc_buffer(doc, df):
         f"العدد الكلي للمستحقين = {total_eligible}\n"
         f"العدد الكلي للمحجوبين = {total_withheld}"
     )
-    stats_run = stats_p.add_run(stats_text)
-    stats_run.font.name = "Segoe UI Semibold"
-    stats_run.font.size = Pt(13)
-    stats_run.bold = True
-    stats_run.font.color.rgb = COLOR_NAVY_BLUE
+    stats_text_run = stats_p.add_run(stats_text)
+    stats_text_run.font.name = "Segoe UI Semibold"
+    stats_text_run.font.size = Pt(13)
+    stats_text_run.bold = True
+    stats_text_run.font.color.rgb = COLOR_NAVY_BLUE
 
-    # الترقيم السفلي للصفحات
     footer = doc.sections[0].footer
     if len(footer.paragraphs) == 0:
         footer_p = footer.add_paragraph()
@@ -496,7 +508,7 @@ with col2:
             "النموذج الأول (الأصلي المطور)", 
             "النموذج الثاني (حجم 14 وحقلين فارغين)",
             "النموذج الثالث (خط 16، عناوين 12، 4 أشهر)",
-            "النموذج الرابع (12 سلة، مستحق فقط)"
+            "النموذج الرابع (12 سلة، العدد الكلي)"
         ],
         index=0,
         horizontal=False
@@ -535,7 +547,7 @@ if st.session_state.processing_done:
     used_card_type = st.session_state.selected_card
     used_template = st.session_state.template_choice
     
-    st.success(f"✅ تم التنظيم الأبجدي بنجاح لـ ({len(df_final)}) قيد اسم (تم قصرها على الاسم الثلاثي).")
+    st.success(f"✅ تم التنظيم الأبجدي بنجاح لـ ({len(df_final)}) قيد اسم (بدون فقدان أي سجل).")
     
     with st.spinner('جاري صياغة وهيكلة مستند Word المطور المختار...'):
         if used_template == "النموذج الأول (الأصلي المطور)":
