@@ -1,6 +1,7 @@
+# import streamlit as st.txt  -- نسخة معدلة شاملة
 import streamlit as st
 import pandas as pd
-from io import BytesIO
+from io import BytesIO, StringIO
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT
@@ -8,10 +9,12 @@ from docx.shared import Cm, Pt, RGBColor
 from docx.oxml import parse_xml, OxmlElement
 from docx.oxml.ns import nsdecls, qn
 import re
+import csv
+import traceback
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------
 # إعدادات الواجهة
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------
 st.set_page_config(page_title="نظام كشوفات الوكلاء الخارق", layout="wide")
 st.markdown("""
     <style>
@@ -30,10 +33,12 @@ if "processing_done" not in st.session_state:
     st.session_state.df_duplicates = None
     st.session_state.output_filename = ""
     st.session_state.selected_card = ""
+    st.session_state.failed_lines = []
+    st.session_state.stats = {}
 
-# -----------------------------------------------------------------------------
-# دوال التنسيق المتقدمة لـ Word
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------
+# دوال تنسيق Word (ثابتة)
+# -------------------------------------------------------------------------
 def set_table_borders(table, color_hex="1A5276"):
     tblPr = table._tbl.tblPr
     borders = parse_xml(f'''
@@ -59,7 +64,7 @@ def set_cell_vertical_text(cell):
 
 def set_cell_no_wrap(cell):
     tcPr = cell._tc.get_or_add_tcPr()
-    no_wrap = parse_xml(f'<w:noWrap {nsdecls("w")}/>')
+    no_wrap = parse_xml(f'<w:noWrap {nsdecls("w")}/>') 
     tcPr.append(no_wrap)
 
 def format_cell_advanced(cell, text, bold=False, color_rgb=None, size_pt=16, font_name="Calibri", align="center"):
@@ -83,100 +88,219 @@ def format_cell_advanced(cell, text, bold=False, color_rgb=None, size_pt=16, fon
         rPr.append(rFonts)
         run.font.size = Pt(size_pt)
 
-# -----------------------------------------------------------------------------
-# وحدات الاستخراج المعزولة (الأساس والأركان كما هي)
-# -----------------------------------------------------------------------------
-def _parse_docx_to_list(file_obj, card_choice):
-    """نفس المحرك الجبري الأصلي دون مساس (يقرأ Word)"""
+# -------------------------------------------------------------------------
+# دالة تصنيف سبب الفشل (لوج)
+# -------------------------------------------------------------------------
+def classify_failure_reason(line):
+    """تعطي سبب محتمل لفشل استخراج السطر"""
+    if not line or not line.strip():
+        return "empty_line"
+    if '<td>' in line or '<table' in line:
+        return "html_table_unparsed"  # سيتم محاولة معالجة HTML-like لكن قد يفشل
+    # لا اسم عربي واضح
+    if not re.search(r'[\u0600-\u06FF]{2,}', line):
+        return "no_arabic_name"
+    # لا أرقام كافية
+    if len(re.findall(r'\b\d{1,}\b', line)) < 1:
+        return "no_numbers"
+    return "ambiguous_format"
+
+# -------------------------------------------------------------------------
+# دالة مساعدة: توليد خلايا فريدة لتفادي مشاكل الخلايا المدموجة
+# -------------------------------------------------------------------------
+def row_cells_unique(row):
+    """يتجاهل الخلايا المكررة الناتجة عن merged cells أفقياً"""
+    seen = set()
+    for cell in row.cells:
+        tc = cell._tc
+        if tc in seen:
+            continue
+        seen.add(tc)
+        yield cell
+
+# -------------------------------------------------------------------------
+# دالة تحليل DOCX محسّنة (استبدال تام)
+# -------------------------------------------------------------------------
+def _parse_docx_to_list(file_obj, card_choice, stop_on_error=False, debug_limit=0):
+    """
+    دالة استخراج مُحسّنة:
+    - تتعامل مع خلايا مدموجة أفقياً بتخطي الخلايا المكررة
+    - تحاول استخراج جداول HTML-like داخل الفقرات
+    - تجمع الفقرات المتتالية إذا لزم الأمر
+    - تُرجع: parsed_records, failed_lines (قائمة tuples (line, reason))
+    """
     doc = Document(file_obj)
-    raw_records = []
-    lines = []
-    
+    parsed_records = []
+    failed_lines = []
+    raw_lines = []
+
+    def parse_html_table_text(text):
+        # يستخرج محتويات <td> ويفكّها إلى صفوف بناءً على عدد أعمدة محتمل
+        tds = re.findall(r'<td[^>]*>(.*?)</td>', text, flags=re.DOTALL | re.IGNORECASE)
+        tds = [re.sub(r'<.*?>', '', td).replace('\n', ' ').strip() for td in tds]
+        rows = []
+        if not tds:
+            return rows
+        # نحاول تقسيم إلى أعمدة شائعة
+        for cols in (8,7,6,5,4):
+            if len(tds) % cols == 0:
+                for i in range(0, len(tds), cols):
+                    rows.append(' | '.join(tds[i:i+cols]))
+                return rows
+        # افتراضي: كل مجموعة td تمثل صفاً واحداً
+        rows.append(' | '.join(tds))
+        return rows
+
+    # 1) استخراج كل صفوف الجداول الحقيقية (مع الحفاظ على الخلايا الفارغة)
     for table in doc.tables:
         for row in table.rows:
-            cells = [c.text.replace('\n', ' ').strip() for c in row.cells if c.text.strip()]
-            lines.append(" | ".join(cells))
-            
-    for para in doc.paragraphs:
-        if para.text.strip() and "|" not in para.text:
-            lines.append(para.text.strip())
-            
-    for line in lines:
-        line_clean = line.replace(',', ' ').replace('،', ' ').replace('-', ' ')
-        if not line_clean: continue
-        
-        if any(w in line_clean for w in ["المركز", "اسم رب", "ملاحظات", "الوكيل", "الافراد", "الكلية", "المحجوبين", "FOOD", "نوع الوكالة"]):
-            continue
-            
-        text_only = re.sub(r'[^\u0600-\u06FF\s\|]', ' ', line_clean)
-        segments = [s.strip() for s in text_only.split('|')]
-        if len(segments) <= 1:
-            segments = [s.strip() for s in text_only.split('  ')]
-            
-        valid_names = []
-        for s in segments:
-            s_clean = re.sub(r'\s+', ' ', s).strip()
-            if len(s_clean.split()) >= 2:
-                valid_names.append(s_clean)
-                
-        if not valid_names:
-            fallback = re.findall(r'[\u0600-\u06FF]{2,}(?:\s+[\u0600-\u06FF]{2,})+', line_clean)
-            if fallback: valid_names = fallback
-            else: continue
-                
-        full_name = max(valid_names, key=len).strip()
-        
-        all_nums = re.findall(r'\d+', line_clean)
-        cards = [n for n in all_nums if len(n) >= 5]
-        
-        old_card = str(cards[0]) if cards else "غير متوفر"
-        new_card = str(cards[-1]) if len(cards) >= 2 else old_card
-        selected_card = new_card if card_choice == "رقم البطاقة الحديث" else old_card
-        
-        idx = line_clean.find(full_name.split()[0])
-        str_before = line_clean[:idx]
-        str_after = line_clean[idx:]
-        
-        smalls_before = [int(n) for n in re.findall(r'\d+', str_before) if len(n) < 5]
-        smalls_after = [int(n) for n in re.findall(r'\d+', str_after) if len(n) < 5]
-        
-        total = eligible = withheld = 0
-        
-        if len(smalls_after) >= 3:
-            total, eligible, withheld = smalls_after[0], smalls_after[1], smalls_after[2]
-        elif len(smalls_before) >= 3:
-            withheld, eligible, total = smalls_before[-3], smalls_before[-2], smalls_before[-1]
-        elif len(smalls_after) == 2:
-            total, eligible = smalls_after[0], smalls_after[1]
-            withheld = 0
-        elif len(smalls_before) == 2:
-            eligible, total = smalls_before[-2], smalls_before[-1]
-            withheld = 0
-        else:
-            all_smalls = smalls_before + smalls_after
-            if len(all_smalls) >= 3:
-                total, eligible, withheld = all_smalls[-3], all_smalls[-2], all_smalls[-1]
-            elif len(all_smalls) == 2:
-                total, eligible, withheld = max(all_smalls), min(all_smalls), 0
-                
-        raw_records.append({
-            "اسم رب الأسرة": full_name,
-            "رقم البطاقة": selected_card,
-            "الكلي": total,
-            "محجوب": withheld,
-            "مستحق": eligible
-        })
-        
-    return raw_records
+            # استخدم row_cells_unique لتفادي الخلايا المكررة بسبب merged cells أفقياً
+            cells = [c.text.replace('\n', ' ').strip() for c in row_cells_unique(row)]
+            # حافظ على عدد الأعمدة الفارغة كـ '' بدلاً من تجاهلها
+            line = " | ".join(cells)
+            if line.strip():
+                raw_lines.append(line)
 
+    # 2) فحص الفقرات: نص عادي أو HTML-like table
+    # نجمع فقرات متتالية التي قد تكون جزءاً من نفس السجل (heuristic)
+    buffer_para = ""
+    for para in doc.paragraphs:
+        txt = para.text.strip()
+        if not txt:
+            # فاصل؛ إذا كان هناك buffer، خزّنه
+            if buffer_para:
+                raw_lines.append(buffer_para.strip())
+                buffer_para = ""
+            continue
+        if '<table' in txt.lower() or '<td' in txt.lower():
+            # تحليل HTML-like داخل الفقرة
+            try:
+                rows = parse_html_table_text(txt)
+                if rows:
+                    raw_lines.extend(rows)
+                else:
+                    raw_lines.append(txt)
+            except Exception:
+                raw_lines.append(txt)
+            continue
+        # إذا الفقرة قصيرة جداً ونهاية سطر سابق لا تحتوي اسم، نجمعها
+        if len(txt.split()) < 4:
+            buffer_para += " " + txt
+        else:
+            if buffer_para:
+                # اجمع buffer مع الفقرة الحالية وحاول كخط واحد
+                combined = (buffer_para + " " + txt).strip()
+                raw_lines.append(combined)
+                buffer_para = ""
+            else:
+                raw_lines.append(txt)
+    if buffer_para:
+        raw_lines.append(buffer_para.strip())
+
+    # 3) الآن نحلل كل raw_line لاستخراج الاسم والأرقام
+    for idx, line in enumerate(raw_lines):
+        try:
+            line_clean = line.replace(',', ' ').replace('،', ' ').replace('-', ' ')
+            # تجاهل رؤوس أو كلمات ثابتة فقط إذا هي رؤوس واضحة
+            header_keywords = ["المركز", "اسم رب", "ملاحظات", "الوكيل", "الافراد", "الكلية", "المحجوبين", "FOOD", "نوع الوكالة", "ت رقم البطاقة"]
+            if any(re.search(r'\b' + re.escape(w) + r'\b', line_clean, flags=re.IGNORECASE) for w in header_keywords):
+                # لكن لا نحذف كل سطر يحتوي هذه الكلمات إذا بدا كسجل (يحتوي اسم عربي وأرقام)
+                if not (re.search(r'[\u0600-\u06FF]{2,}', line_clean) and re.search(r'\d', line_clean)):
+                    continue
+
+            # استخراج أرقام (نقبل أرقام بطول >=4 كمرشّح للبطاقة)
+            all_nums = re.findall(r'\b0*\d{4,}\b', line_clean)
+            # استخراج أرقام صغيرة (1-3 خانات) للـ كلي/مستحق/محجوب
+            smalls_all = re.findall(r'\b\d{1,3}\b', line_clean)
+
+            # استخراج أسماء عربية قوية (سلسلة كلمات عربية)
+            name_matches = re.findall(r'[\u0600-\u06FF]{2,}(?:\s+[\u0600-\u06FF]{2,})*', line_clean)
+            name = None
+            if name_matches:
+                # نأخذ أطول تطابق غالباً الاسم الكامل
+                name = max(name_matches, key=len).strip()
+
+            if not name:
+                # محاولة بديلة: إذا وجدنا خلية ثالثة أو رابع تحتوي نص عربي في تقسيم بـ '|'
+                parts = [p.strip() for p in re.split(r'\||\t', line_clean) if p.strip()]
+                for p in parts:
+                    if re.search(r'[\u0600-\u06FF]{2,}', p):
+                        name = p
+                        break
+
+            if not name:
+                reason = classify_failure_reason(line_clean)
+                failed_lines.append((line, reason))
+                continue
+
+            # تحديد أرقام البطاقة: نعتبر أطول رقم >=4 كرقم بطاقة حديث
+            cards = [n for n in all_nums if len(n) >= 4]
+            old_card = cards[0] if cards else "غير متوفر"
+            new_card = cards[-1] if len(cards) >= 2 else old_card
+            selected_card = new_card if card_choice == "رقم البطاقة الحديث" else old_card
+
+            # استخراج أعداد (الكلي، مستحق، محجوب) بمحاولة ذكية حول موقع الاسم
+            # نبحث عن أرقام صغيرة بعد الاسم أولاً
+            idx_name = line_clean.find(name.split()[0])
+            before = line_clean[:idx_name] if idx_name >= 0 else ""
+            after = line_clean[idx_name + len(name):] if idx_name >= 0 else line_clean
+
+            smalls_before = [int(n) for n in re.findall(r'\b\d{1,3}\b', before)]
+            smalls_after = [int(n) for n in re.findall(r'\b\d{1,3}\b', after)]
+
+            total = eligible = withheld = 0
+            # قواعد مرنة: نفضّل الأرقام بعد الاسم إن وُجدت
+            nums = smalls_after if len(smalls_after) >= 1 else smalls_before
+            if len(nums) >= 3:
+                total, eligible, withheld = nums[0], nums[1], nums[2]
+            elif len(nums) == 2:
+                total, eligible = nums[0], nums[1]
+                withheld = 0
+            elif len(nums) == 1:
+                total = nums[0]
+                eligible = withheld = 0
+            else:
+                # محاولة أخيرة: أرقام عامة في السطر (غير مقسمة)
+                all_smalls = [int(n) for n in re.findall(r'\b\d{1,3}\b', line_clean)]
+                if len(all_smalls) >= 3:
+                    total, eligible, withheld = all_smalls[-3], all_smalls[-2], all_smalls[-1]
+                elif len(all_smalls) == 2:
+                    total, eligible = max(all_smalls), min(all_smalls)
+                    withheld = 0
+                else:
+                    reason = classify_failure_reason(line_clean)
+                    failed_lines.append((line, reason))
+                    continue
+
+            parsed_records.append({
+                "اسم رب الأسرة": name,
+                "رقم البطاقة": selected_card,
+                "الكلي": total,
+                "محجوب": withheld,
+                "مستحق": eligible
+            })
+
+            # debug limit: لتجارب سريعة
+            if debug_limit and len(parsed_records) >= debug_limit:
+                break
+
+        except Exception as e:
+            failed_lines.append((line, f"exception:{str(e)}"))
+            # استمر في المعالجة ما لم يطلب التوقف
+            if stop_on_error:
+                raise
+
+    return parsed_records, failed_lines
+
+# -------------------------------------------------------------------------
+# وحدة الاستخراج من Excel/CSV (ثابتة مع تحسين طفيف)
+# -------------------------------------------------------------------------
 def _parse_excel_to_list(file_obj, file_ext):
-    """وحدة الاستخراج المرنة لقراءة جداول الـ Excel أو الـ CSV ودمجها"""
     records = []
     try:
         df_in = pd.read_excel(file_obj) if file_ext == 'xlsx' else pd.read_csv(file_obj)
         df_in.columns = df_in.columns.astype(str).str.strip()
         
-        # التقاط الأعمدة ديناميكياً لتجنب توقف الكود بسبب اختلاف تسميات الأعمدة في الإكسل
         col_name = next((c for c in df_in.columns if 'اسم' in c), df_in.columns[1] if len(df_in.columns)>1 else df_in.columns[0])
         col_card = next((c for c in df_in.columns if 'بطاق' in c), df_in.columns[6] if len(df_in.columns)>6 else df_in.columns[-1])
         col_total = next((c for c in df_in.columns if 'كلي' in c), None)
@@ -205,21 +329,30 @@ def _parse_excel_to_list(file_obj, file_ext):
         st.warning(f"تنبيه: حدث خطأ أثناء تحليل ملف الإكسل/الجدول الإضافي ({e})")
     return records
 
-# -----------------------------------------------------------------------------
-# الماستر: الدمج والفرز والتنظيف (مع الحفاظ على الكيان)
-# -----------------------------------------------------------------------------
-def extract_and_clean_data(file_obj, card_choice, file_obj2=None, file2_ext=None):
-    # 1. استخراج الأساسي
-    raw_records = _parse_docx_to_list(file_obj, card_choice)
+# -------------------------------------------------------------------------
+# الماستر: الدمج والفرز والتنظيف (محدّث لاستقبال failed_lines)
+# -------------------------------------------------------------------------
+def extract_and_clean_data(file_obj, card_choice, file_obj2=None, file2_ext=None, stop_on_error=False):
+    # 1. استخراج الأساسي (الآن يعيد parsed و failed_lines)
+    parsed_primary, failed_primary = _parse_docx_to_list(file_obj, card_choice, stop_on_error=stop_on_error)
     
     # 2. استخراج ودمج الإضافي (إن وجد)
+    parsed_secondary = []
+    failed_secondary = []
     if file_obj2:
         if file2_ext == 'docx':
-            raw_records.extend(_parse_docx_to_list(file_obj2, card_choice))
+            parsed_secondary, failed_secondary = _parse_docx_to_list(file_obj2, card_choice, stop_on_error=stop_on_error)
         elif file2_ext in ['xlsx', 'csv']:
-            raw_records.extend(_parse_excel_to_list(file_obj2, file2_ext))
-            
-    df = pd.DataFrame(raw_records)
+            parsed_secondary = _parse_excel_to_list(file_obj2, file2_ext)
+            # ملفات الإكسل لا تُرجع failed_lines هنا
+        else:
+            # غير مدعوم
+            pass
+
+    all_parsed = parsed_primary + parsed_secondary
+    all_failed = failed_primary + failed_secondary
+
+    df = pd.DataFrame(all_parsed)
     df_duplicates = pd.DataFrame()
     
     if not df.empty:
@@ -230,17 +363,21 @@ def extract_and_clean_data(file_obj, card_choice, file_obj2=None, file2_ext=None
             df_duplicates = df_duplicates.sort_values(by="اسم رب الأسرة").reset_index(drop=True)
             df_duplicates.insert(0, "ت", df_duplicates.index + 1)
 
-        # الكشف النهائي المعقم والمدمج
         df = df.drop_duplicates(keep='first')
-        # الفرز الأبجدي يتم هنا لجميع الملفات المدمجة تلقائياً
         df = df.sort_values(by="اسم رب الأسرة").reset_index(drop=True)
         df.insert(0, "ت", df.index + 1)
         
-    return df, df_duplicates, len(raw_records)
+    stats = {
+        "total_raw_lines": len(all_parsed) + len(all_failed),
+        "parsed_count": len(all_parsed),
+        "failed_count": len(all_failed),
+        "duplicates_count": len(df_duplicates),
+    }
+    return df, df_duplicates, all_failed, stats
 
-# -----------------------------------------------------------------------------
-# محرك بناء تقرير Word
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------
+# محرك بناء تقرير Word (ثابت)
+# -------------------------------------------------------------------------
 def build_professional_word_report(df, filename_base, card_choice, is_duplicate_report=False):
     doc = Document()
     
@@ -290,7 +427,10 @@ def build_professional_word_report(df, filename_base, card_choice, is_duplicate_
     trPr = table.rows[0]._tr.get_or_add_trPr()
     trPr.append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
     
-    max_name_len = max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15)
+    if not df.empty:
+        max_name_len = max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15)
+    else:
+        max_name_len = 15
     dynamic_name_width = Cm(max_name_len * 0.22 + 0.5)
     
     col_widths = [Cm(0.9), dynamic_name_width, Cm(0.44), Cm(0.9), Cm(0.9), Cm(0.9), Cm(3.0), Cm(2.19)]
@@ -351,9 +491,9 @@ def build_professional_word_report(df, filename_base, card_choice, is_duplicate_
                 elif i == 4: set_cell_background(row_cells[i], HEX_LIGHT_GREEN)  
                 elif i == 5: set_cell_background(row_cells[i], HEX_LIGHT_RED)    
 
-    total_all = df["الكلي"].astype(int).sum()
-    total_eligible = df["مستحق"].astype(int).sum()
-    total_withheld = df["محجوب"].astype(int).sum()
+    total_all = df["الكلي"].astype(int).sum() if not df.empty else 0
+    total_eligible = df["مستحق"].astype(int).sum() if not df.empty else 0
+    total_withheld = df["محجوب"].astype(int).sum() if not df.empty else 0
     
     doc.add_paragraph()  
     stats_p = doc.add_paragraph()
@@ -374,9 +514,9 @@ def build_professional_word_report(df, filename_base, card_choice, is_duplicate_
     buffer.seek(0)
     return buffer
 
-# -----------------------------------------------------------------------------
-# واجهة الاستخدام المُحسّنة (رفع ملفين)
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------
+# واجهة الاستخدام (معدّلة لإظهار لوج الفشل وإحصاءات)
+# -------------------------------------------------------------------------
 col1, col2 = st.columns(2)
 with col2:
     st.markdown("<h3 style='text-align: right;'>📂 رفع الكشف الأساسي (Word)</h3>", unsafe_allow_html=True)
@@ -399,35 +539,43 @@ if st.button("🚀 تشغيل المحرك الجبري (استخراج ودمج
     if uploaded_file:
         with st.spinner('يتم الآن سحق الجداول وتحليل الشيفرات ودمج البيانات أبجدياً...'):
             try:
-                # معرفة صيغة الملف الثاني إن وجد
                 file2_ext = uploaded_file2.name.split('.')[-1].lower() if uploaded_file2 else None
                 
-                df_res, df_dup, total_scanned = extract_and_clean_data(uploaded_file, selected_card, uploaded_file2, file2_ext)
+                df_res, df_dup, failed_lines, stats = extract_and_clean_data(uploaded_file, selected_card, uploaded_file2, file2_ext)
                 
-                if not df_res.empty:
-                    st.session_state.df_final = df_res
-                    st.session_state.df_duplicates = df_dup
-                    st.session_state.total_scanned = total_scanned
-                    st.session_state.output_filename = uploaded_file.name.rsplit('.', 1)[0]
-                    st.session_state.selected_card = selected_card
-                    st.session_state.processing_done = True
-                else:
+                st.session_state.df_final = df_res
+                st.session_state.df_duplicates = df_dup
+                st.session_state.failed_lines = failed_lines
+                st.session_state.stats = stats
+                st.session_state.output_filename = uploaded_file.name.rsplit('.', 1)[0]
+                st.session_state.selected_card = selected_card
+                st.session_state.processing_done = True
+
+                if df_res.empty:
                     st.error("لم يتم العثور على بيانات جداول متوافقة. يرجى التأكد من محتوى الملف.")
+                else:
+                    st.success(f"استخراج أولي: تم استخراج {len(df_res)} سجلّاً؛ فشل في استخراج {len(failed_lines)} سطر (سجّل للتدقيق).")
             except Exception as e:
-                st.error(f"خطأ غير متوقع: {e}")
+                st.error(f"خطأ غير متوقع أثناء المعالجة: {e}")
+                st.error(traceback.format_exc())
     else:
         st.warning("الرجاء رفع ملف الكشف الأساسي (Word) أولاً.")
 
+# -------------------------------------------------------------------------
+# بعد المعالجة: تنزيل التقارير + لوج الفشل
+# -------------------------------------------------------------------------
 if st.session_state.processing_done:
     df_final = st.session_state.df_final
     df_duplicates = st.session_state.df_duplicates
+    failed_lines = st.session_state.failed_lines
+    stats = st.session_state.stats
     output_filename = st.session_state.output_filename
     used_card_type = st.session_state.selected_card
-    
+
     st.balloons()
     merge_text = " (شاملة البيانات المدمجة)" if uploaded_file2 else ""
     st.success(f"🏆 المهمة أُنجزت! تم استخراج وترتيب ({len(df_final)}) قيد صافٍ أبجدياً{merge_text}.")
-    
+
     with st.spinner('جاري صياغة الكشف الذهبي الأساسي...'):
         word_output = build_professional_word_report(df_final, output_filename, used_card_type, is_duplicate_report=False)
         
@@ -449,3 +597,42 @@ if st.session_state.processing_done:
             file_name=f"سجلات_متكررة_معزولة_{output_filename}.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
+
+    # إظهار إحصاءات موجزة
+    st.markdown("### إحصاءات الاستخراج")
+    st.write({
+        "عدد السجلات المستخرجة": stats.get("parsed_count", 0),
+        "عدد الأسطر الفاشلة": stats.get("failed_count", 0),
+        "عدد التكرارات المعزولة": stats.get("duplicates_count", 0),
+    })
+
+    # عرض عيّنة من failed_lines مع سبب الفشل
+    if failed_lines:
+        st.markdown("### أمثلة على الأسطر التي فشل استخراجها (مع سبب الفشل)")
+        sample = failed_lines[:200]
+        df_failed = pd.DataFrame(sample, columns=["السطر الخام", "سبب الفشل"])
+        st.dataframe(df_failed)
+
+        # زر تنزيل لوج الفشل كـ CSV
+        csv_buffer = StringIO()
+        writer = csv.writer(csv_buffer)
+        writer.writerow(["السطر الخام", "سبب الفشل"])
+        for ln, reason in failed_lines:
+            writer.writerow([ln, reason])
+        csv_buffer.seek(0)
+        st.download_button(
+            label="📥 تحميل لوج الأسطر الفاشلة (CSV)",
+            data=csv_buffer.getvalue(),
+            file_name=f"failed_lines_{output_filename}.csv",
+            mime="text/csv"
+        )
+
+    # عرض نصي: نصائح سريعة بناءً على أسباب الفشل الشائعة
+    st.markdown("### توصيات سريعة لتحسين الاستخراج")
+    st.markdown("""
+    - إذا كانت معظم أسباب الفشل `html_table_unparsed` فالمستند يحتوي على جداول داخلية بصيغة HTML-like؛ أعد حفظ المستند كـ Word حقيقي (بدون HTML داخل الفقرات) أو زودني بنسخة من الصفحات الأولى لأقوم بتخصيص parser.
+    - إذا كانت الأسباب `no_arabic_name` أو `not_enough_numbers` فراجع تنسيق الأعمدة في الملف الأصلي (قد تكون الأسماء موزعة على خلايا متعددة أو أرقام البطاقات قصيرة).
+    - استخدم زر تنزيل لوج الفشل لمراجعة الأسطر يدوياً وإضافة قواعد استثنائية إذا لزم.
+    """)
+
+# نهاية الملف
