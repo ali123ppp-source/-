@@ -1,4 +1,4 @@
-# import streamlit as st.txt  -- نسخة نهائية مدموجة مع الدالة المحسّنة
+# import streamlit as st.txt  -- نسخة نهائية مدموجة مع دالة دمج الأسطر المبعثرة
 import streamlit as st
 import pandas as pd
 from io import BytesIO, StringIO
@@ -117,6 +117,83 @@ def row_cells_unique(row):
         yield cell
 
 # -------------------------------------------------------------------------
+# دالة لدمج الأسطر المبعثرة قبل التحليل
+# -------------------------------------------------------------------------
+def merge_fragmented_lines(raw_lines, max_group=3):
+    """
+    يدمج الأسطر المبعثرة التي تحتوي أرقاماً فقط أو أجزاء سجلات.
+    - raw_lines: قائمة الأسطر الخام (قائمة سترينج)
+    - max_group: الحد الأقصى لعدد الأسطر التي نسمح بدمجها معاً
+    يعيد قائمة جديدة من الأسطر المدمجة.
+    """
+    merged = []
+    i = 0
+    n = len(raw_lines)
+    arabic_re = re.compile(r'[\u0600-\u06FF]')
+    numeric_only_re = re.compile(r'^\s*(?:\d+\s*)+$')  # سطر يحتوي أرقام فقط
+    short_nums_re = re.compile(r'^\s*(?:\d{1,3}\s+){1,}\d{1,3}\s*$')  # أرقام قصيرة 1-3 خانات
+    while i < n:
+        line = raw_lines[i].strip()
+        # حالة: سطر أرقام فقط → حاول دمجه مع السابق أو التالي الذي يحتوي اسم عربي
+        if numeric_only_re.match(line) or (short_nums_re.match(line) and not arabic_re.search(line)):
+            # نفضّل الدمج مع السطر السابق إذا يحتوي اسم عربي
+            if merged and arabic_re.search(merged[-1]):
+                merged[-1] = merged[-1] + " " + line
+                i += 1
+                continue
+            # وإلا ندمجه مع التالي إذا التالي يحتوي اسم عربي
+            if i + 1 < n and arabic_re.search(raw_lines[i+1]):
+                combined = raw_lines[i+1].strip()
+                merged.append(line + " " + combined)
+                i += 2
+                continue
+            # وإلا نحتفظ به كخط مستقل (قد يكون ملخصاً)
+            merged.append(line)
+            i += 1
+            continue
+
+        # حالة: السطر يبدأ بأرقام/مؤشر ثم لا يحتوي اسم واضح، والصف التالي يبدأ باسم → ادمجهما
+        parts = re.split(r'\||\t', line)
+        has_arabic = any(arabic_re.search(p) for p in parts)
+        if not has_arabic and i + 1 < n and arabic_re.search(raw_lines[i+1]):
+            merged.append(line + " " + raw_lines[i+1].strip())
+            i += 2
+            continue
+
+        # حالة: السطر يحتوي اسم جزئي (قصير) والأرقام موزعة على السطر التالي → دمج إذا التالي أرقام
+        if arabic_re.search(line) and i + 1 < n and numeric_only_re.match(raw_lines[i+1].strip()):
+            merged.append(line + " " + raw_lines[i+1].strip())
+            i += 2
+            continue
+
+        # حالة عامة: لا دمج
+        merged.append(line)
+        i += 1
+
+    # خطوة ثانية: محاولة دمج مجموعات صغيرة متبقية (حد أقصى max_group)
+    final = []
+    i = 0
+    n = len(merged)
+    while i < n:
+        group = [merged[i]]
+        j = i + 1
+        while j < n and len(group) < max_group:
+            # إذا المجموعة الحالية لا تحتوي اسم عربي لكن العنصر التالي يحتوي اسمًا، ندمج
+            if not re.search(r'[\u0600-\u06FF]', " ".join(group)) and re.search(r'[\u0600-\u06FF]', merged[j]):
+                group.append(merged[j])
+                j += 1
+                break
+            # إذا العنصر التالي عبارة عن أرقام فقط، نضمّه
+            if numeric_only_re.match(merged[j]):
+                group.append(merged[j])
+                j += 1
+                continue
+            break
+        final.append(" ".join(group))
+        i = j
+    return final
+
+# -------------------------------------------------------------------------
 # دالة تحليل DOCX محسّنة (النسخة النهائية المدموجة)
 # -------------------------------------------------------------------------
 def _parse_docx_to_list(file_obj, card_choice, stop_on_error=False, debug_limit=0):
@@ -125,6 +202,7 @@ def _parse_docx_to_list(file_obj, card_choice, stop_on_error=False, debug_limit=
     - تتعامل مع merged cells أفقياً وعمودياً (vMerge)
     - تحلل HTML-like tables داخل الفقرات
     - تجمع فقرات مبعثرة
+    - تدمج الأسطر المبعثرة قبل التحليل
     - ترجع parsed_records, failed_lines, raw_lines_count
     """
     doc = Document(file_obj)
@@ -219,6 +297,9 @@ def _parse_docx_to_list(file_obj, card_choice, stop_on_error=False, debug_limit=
                 raw_lines.append(txt)
     if buffer_para:
         raw_lines.append(buffer_para.strip())
+
+    # --- 2.5) دمج الأسطر المبعثرة قبل التحليل ---
+    raw_lines = merge_fragmented_lines(raw_lines)
 
     # --- 3) تحليل كل raw_line لاستخراج الاسم والأرقام مع قواعد مرنة ---
     header_keywords = ["المركز", "اسم رب", "ملاحظات", "الوكيل", "الافراد", "الكلية", "المحجوبين", "FOOD", "نوع الوكالة", "ت رقم البطاقة", "اجمالي", "المجموع"]
