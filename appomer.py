@@ -1,4 +1,4 @@
-# import streamlit as st.txt  -- نسخة نهائية مدموجة مع دالة دمج الأسطر المبعثرة
+# import streamlit as st.txt  -- نسخة نهائية مدموجة وشاملة معالجة vMerge ودمج الأسطر المبعثرة وتسجيل merge_groups
 import streamlit as st
 import pandas as pd
 from io import BytesIO, StringIO
@@ -34,6 +34,7 @@ if "processing_done" not in st.session_state:
     st.session_state.output_filename = ""
     st.session_state.selected_card = ""
     st.session_state.failed_lines = []
+    st.session_state.merge_groups = []
     st.session_state.stats = {}
 
 # -------------------------------------------------------------------------
@@ -117,98 +118,22 @@ def row_cells_unique(row):
         yield cell
 
 # -------------------------------------------------------------------------
-# دالة لدمج الأسطر المبعثرة قبل التحليل
-# -------------------------------------------------------------------------
-def merge_fragmented_lines(raw_lines, max_group=3):
-    """
-    يدمج الأسطر المبعثرة التي تحتوي أرقاماً فقط أو أجزاء سجلات.
-    - raw_lines: قائمة الأسطر الخام (قائمة سترينج)
-    - max_group: الحد الأقصى لعدد الأسطر التي نسمح بدمجها معاً
-    يعيد قائمة جديدة من الأسطر المدمجة.
-    """
-    merged = []
-    i = 0
-    n = len(raw_lines)
-    arabic_re = re.compile(r'[\u0600-\u06FF]')
-    numeric_only_re = re.compile(r'^\s*(?:\d+\s*)+$')  # سطر يحتوي أرقام فقط
-    short_nums_re = re.compile(r'^\s*(?:\d{1,3}\s+){1,}\d{1,3}\s*$')  # أرقام قصيرة 1-3 خانات
-    while i < n:
-        line = raw_lines[i].strip()
-        # حالة: سطر أرقام فقط → حاول دمجه مع السابق أو التالي الذي يحتوي اسم عربي
-        if numeric_only_re.match(line) or (short_nums_re.match(line) and not arabic_re.search(line)):
-            # نفضّل الدمج مع السطر السابق إذا يحتوي اسم عربي
-            if merged and arabic_re.search(merged[-1]):
-                merged[-1] = merged[-1] + " " + line
-                i += 1
-                continue
-            # وإلا ندمجه مع التالي إذا التالي يحتوي اسم عربي
-            if i + 1 < n and arabic_re.search(raw_lines[i+1]):
-                combined = raw_lines[i+1].strip()
-                merged.append(line + " " + combined)
-                i += 2
-                continue
-            # وإلا نحتفظ به كخط مستقل (قد يكون ملخصاً)
-            merged.append(line)
-            i += 1
-            continue
-
-        # حالة: السطر يبدأ بأرقام/مؤشر ثم لا يحتوي اسم واضح، والصف التالي يبدأ باسم → ادمجهما
-        parts = re.split(r'\||\t', line)
-        has_arabic = any(arabic_re.search(p) for p in parts)
-        if not has_arabic and i + 1 < n and arabic_re.search(raw_lines[i+1]):
-            merged.append(line + " " + raw_lines[i+1].strip())
-            i += 2
-            continue
-
-        # حالة: السطر يحتوي اسم جزئي (قصير) والأرقام موزعة على السطر التالي → دمج إذا التالي أرقام
-        if arabic_re.search(line) and i + 1 < n and numeric_only_re.match(raw_lines[i+1].strip()):
-            merged.append(line + " " + raw_lines[i+1].strip())
-            i += 2
-            continue
-
-        # حالة عامة: لا دمج
-        merged.append(line)
-        i += 1
-
-    # خطوة ثانية: محاولة دمج مجموعات صغيرة متبقية (حد أقصى max_group)
-    final = []
-    i = 0
-    n = len(merged)
-    while i < n:
-        group = [merged[i]]
-        j = i + 1
-        while j < n and len(group) < max_group:
-            # إذا المجموعة الحالية لا تحتوي اسم عربي لكن العنصر التالي يحتوي اسمًا، ندمج
-            if not re.search(r'[\u0600-\u06FF]', " ".join(group)) and re.search(r'[\u0600-\u06FF]', merged[j]):
-                group.append(merged[j])
-                j += 1
-                break
-            # إذا العنصر التالي عبارة عن أرقام فقط، نضمّه
-            if numeric_only_re.match(merged[j]):
-                group.append(merged[j])
-                j += 1
-                continue
-            break
-        final.append(" ".join(group))
-        i = j
-    return final
-
-# -------------------------------------------------------------------------
-# دالة تحليل DOCX محسّنة (النسخة النهائية المدموجة)
+# دالة تحليل DOCX محسّنة وشاملة (مدموجة مع merge_groups)
 # -------------------------------------------------------------------------
 def _parse_docx_to_list(file_obj, card_choice, stop_on_error=False, debug_limit=0):
     """
-    نسخة محسّنة نهائية:
-    - تتعامل مع merged cells أفقياً وعمودياً (vMerge)
+    دالة محسّنة نهائية:
+    - تتعامل مع merged cells أفقياً وعمودياً (vMerge restart/continue)
     - تحلل HTML-like tables داخل الفقرات
     - تجمع فقرات مبعثرة
     - تدمج الأسطر المبعثرة قبل التحليل
-    - ترجع parsed_records, failed_lines, raw_lines_count
+    - ترجع parsed_records, failed_lines, raw_lines_count, merge_groups
     """
     doc = Document(file_obj)
     parsed_records = []
     failed_lines = []
     raw_lines = []
+    merge_groups = []
 
     def parse_html_table_text(text):
         tds = re.findall(r'<td[^>]*>(.*?)</td>', text, flags=re.DOTALL | re.IGNORECASE)
@@ -224,13 +149,6 @@ def _parse_docx_to_list(file_obj, card_choice, stop_on_error=False, debug_limit=
         rows.append(' | '.join(tds))
         return rows
 
-    def classify_failure_reason_local(line):
-        if not line or not line.strip(): return "empty_line"
-        if '<td' in line.lower() or '<table' in line.lower(): return "html_table_unparsed"
-        if not re.search(r'[\u0600-\u06FF]{2,}', line): return "no_arabic_name"
-        if len(re.findall(r'\b\d{1,}\b', line)) < 1: return "no_numbers"
-        return "ambiguous_format"
-
     # --- 1) استخراج صفوف الجداول الحقيقية مع معالجة vMerge عمودي و merged أفقياً ---
     for table in doc.tables:
         prev_row_texts = []
@@ -242,7 +160,6 @@ def _parse_docx_to_list(file_obj, card_choice, stop_on_error=False, debug_limit=
                 if tc in seen:
                     continue
                 seen.add(tc)
-                # فحص vMerge داخل خصائص الخلية
                 vmerge = None
                 try:
                     tcPr = tc.tcPr
@@ -254,22 +171,21 @@ def _parse_docx_to_list(file_obj, card_choice, stop_on_error=False, debug_limit=
                     vmerge = None
                 text = cell.text.replace('\n', ' ').strip()
                 cells.append((text, vmerge))
-            # حل مشكلة vMerge عمودي
             resolved = []
             for i, (txt, vmerge) in enumerate(cells):
                 if vmerge and str(vmerge).lower() == 'continue':
-                    if i < len(prev_row_texts):
+                    if i < len(prev_row_texts) and prev_row_texts[i].strip():
                         resolved.append(prev_row_texts[i])
                     else:
                         resolved.append(txt)
                 else:
                     resolved.append(txt)
-            prev_row_texts = resolved[:]  # للاستخدام في الصف التالي
+            prev_row_texts = resolved[:]
             line = " | ".join([r for r in resolved])
             if line.strip():
                 raw_lines.append(line)
 
-    # --- 2) فحص الفقرات (نحلل HTML-like أو نجمع فقرات قصيرة) ---
+    # --- 2) فحص الفقرات: HTML-like أو تجميع فقرات قصيرة ---
     buffer_para = ""
     for para in doc.paragraphs:
         txt = para.text.strip()
@@ -298,7 +214,77 @@ def _parse_docx_to_list(file_obj, card_choice, stop_on_error=False, debug_limit=
     if buffer_para:
         raw_lines.append(buffer_para.strip())
 
-    # --- 2.5) دمج الأسطر المبعثرة قبل التحليل ---
+    # --- 2.5) مرحلة ذكية لدمج الأسطر المبعثرة (pre-merge) ---
+    def merge_fragmented_lines(raw_lines, max_group=4):
+        merged = []
+        i = 0
+        n = len(raw_lines)
+        arabic_re = re.compile(r'[\u0600-\u06FF]')
+        numeric_only_re = re.compile(r'^\s*(?:\d+\s*)+$')
+        short_nums_re = re.compile(r'^\s*(?:\d{1,3}\s+){1,}\d{1,3}\s*$')
+        index_prefix_re = re.compile(r'^\s*\d+\s+')
+        while i < n:
+            line = raw_lines[i].strip()
+            if numeric_only_re.match(line) or (short_nums_re.match(line) and not arabic_re.search(line)):
+                if merged and arabic_re.search(merged[-1]):
+                    merged[-1] = merged[-1] + " " + line
+                    merge_groups.append(((i-1, i), merged[-1], "numbers_to_prev"))
+                    i += 1
+                    continue
+                if i + 1 < n and arabic_re.search(raw_lines[i+1]):
+                    combined = raw_lines[i+1].strip()
+                    merged.append(line + " " + combined)
+                    merge_groups.append(((i, i+1), line + " " + combined, "numbers_to_next"))
+                    i += 2
+                    continue
+                merged.append(line)
+                i += 1
+                continue
+
+            if index_prefix_re.match(line) and not arabic_re.search(line) and i + 1 < n and arabic_re.search(raw_lines[i+1]):
+                merged.append(line + " " + raw_lines[i+1].strip())
+                merge_groups.append(((i, i+1), line + " " + raw_lines[i+1].strip(), "index_to_next_name"))
+                i += 2
+                continue
+
+            if arabic_re.search(line) and i + 1 < n and numeric_only_re.match(raw_lines[i+1].strip()):
+                merged.append(line + " " + raw_lines[i+1].strip())
+                merge_groups.append(((i, i+1), line + " " + raw_lines[i+1].strip(), "name_then_numbers"))
+                i += 2
+                continue
+
+            if arabic_re.search(line) and i + 1 < n and arabic_re.search(raw_lines[i+1]) and len(line.split()) <= 2:
+                if re.search(r'\d', raw_lines[i+1]):
+                    merged.append(line + " " + raw_lines[i+1].strip())
+                    merge_groups.append(((i, i+1), line + " " + raw_lines[i+1].strip(), "split_name_merge"))
+                    i += 2
+                    continue
+
+            merged.append(line)
+            i += 1
+
+        final = []
+        i = 0
+        n = len(merged)
+        while i < n:
+            group = [merged[i]]
+            j = i + 1
+            while j < n and len(group) < max_group:
+                if not re.search(r'[\u0600-\u06FF]', " ".join(group)) and re.search(r'[\u0600-\u06FF]', merged[j]):
+                    group.append(merged[j])
+                    j += 1
+                    break
+                if numeric_only_re.match(merged[j]):
+                    group.append(merged[j])
+                    j += 1
+                    continue
+                break
+            if len(group) > 1:
+                merge_groups.append(((i, j-1), " ".join(group), "post_group_merge"))
+            final.append(" ".join(group))
+            i = j
+        return final
+
     raw_lines = merge_fragmented_lines(raw_lines)
 
     # --- 3) تحليل كل raw_line لاستخراج الاسم والأرقام مع قواعد مرنة ---
@@ -326,7 +312,7 @@ def _parse_docx_to_list(file_obj, card_choice, stop_on_error=False, debug_limit=
                         break
 
             if not name:
-                reason = classify_failure_reason_local(line_clean)
+                reason = classify_failure_reason(line_clean)
                 failed_lines.append((line, reason))
                 continue
 
@@ -360,7 +346,7 @@ def _parse_docx_to_list(file_obj, card_choice, stop_on_error=False, debug_limit=
                     total, eligible = max(all_smalls), min(all_smalls)
                     withheld = 0
                 else:
-                    reason = classify_failure_reason_local(line_clean)
+                    reason = classify_failure_reason(line_clean)
                     failed_lines.append((line, reason))
                     continue
 
@@ -384,7 +370,7 @@ def _parse_docx_to_list(file_obj, card_choice, stop_on_error=False, debug_limit=
                 raise
 
     raw_count = len(raw_lines)
-    return parsed_records, failed_lines, raw_count
+    return parsed_records, failed_lines, raw_count, merge_groups
 
 # -------------------------------------------------------------------------
 # وحدة الاستخراج من Excel/CSV (ثابتة مع تحسين طفيف)
@@ -424,28 +410,31 @@ def _parse_excel_to_list(file_obj, file_ext):
     return records
 
 # -------------------------------------------------------------------------
-# الماستر: الدمج والفرز والتنظيف (محدّث لاستقبال failed_lines)
+# الماستر: الدمج والفرز والتنظيف (محدّث لاستقبال merge_groups)
 # -------------------------------------------------------------------------
 def extract_and_clean_data(file_obj, card_choice, file_obj2=None, file2_ext=None, stop_on_error=False):
-    # 1. استخراج الأساسي (الآن يعيد parsed و failed_lines و raw_count)
-    parsed_primary, failed_primary, raw_count_primary = _parse_docx_to_list(file_obj, card_choice, stop_on_error=stop_on_error)
+    # 1. استخراج الأساسي (الآن يعيد parsed, failed, raw_count, merge_groups)
+    parsed_primary, failed_primary, raw_count_primary, merge_groups_primary = _parse_docx_to_list(file_obj, card_choice, stop_on_error=stop_on_error)
     
     # 2. استخراج ودمج الإضافي (إن وجد)
     parsed_secondary = []
     failed_secondary = []
     raw_count_secondary = 0
+    merge_groups_secondary = []
     if file_obj2:
         if file2_ext == 'docx':
-            parsed_secondary, failed_secondary, raw_count_secondary = _parse_docx_to_list(file_obj2, card_choice, stop_on_error=stop_on_error)
+            parsed_secondary, failed_secondary, raw_count_secondary, merge_groups_secondary = _parse_docx_to_list(file_obj2, card_choice, stop_on_error=stop_on_error)
         elif file2_ext in ['xlsx', 'csv']:
             parsed_secondary = _parse_excel_to_list(file_obj2, file2_ext)
             failed_secondary = []
             raw_count_secondary = len(parsed_secondary)
+            merge_groups_secondary = []
         else:
             pass
 
     all_parsed = parsed_primary + parsed_secondary
     all_failed = failed_primary + failed_secondary
+    all_merge_groups = merge_groups_primary + merge_groups_secondary
 
     df = pd.DataFrame(all_parsed)
     df_duplicates = pd.DataFrame()
@@ -468,8 +457,9 @@ def extract_and_clean_data(file_obj, card_choice, file_obj2=None, file2_ext=None
         "parsed_count": len(all_parsed),
         "failed_count": len(all_failed),
         "duplicates_count": len(df_duplicates),
+        "merge_groups_count": len(all_merge_groups),
     }
-    return df, df_duplicates, all_failed, stats
+    return df, df_duplicates, all_failed, all_merge_groups, stats
 
 # -------------------------------------------------------------------------
 # محرك بناء تقرير Word (ثابت)
@@ -611,7 +601,7 @@ def build_professional_word_report(df, filename_base, card_choice, is_duplicate_
     return buffer
 
 # -------------------------------------------------------------------------
-# واجهة الاستخدام (معدّلة لإظهار لوج الفشل وإحصاءات)
+# واجهة الاستخدام (معدّلة لإظهار لوج الفشل وإحصاءات و merge_groups)
 # -------------------------------------------------------------------------
 col1, col2 = st.columns(2)
 with col2:
@@ -637,11 +627,12 @@ if st.button("🚀 تشغيل المحرك الجبري (استخراج ودمج
             try:
                 file2_ext = uploaded_file2.name.split('.')[-1].lower() if uploaded_file2 else None
                 
-                df_res, df_dup, failed_lines, stats = extract_and_clean_data(uploaded_file, selected_card, uploaded_file2, file2_ext)
+                df_res, df_dup, failed_lines, merge_groups, stats = extract_and_clean_data(uploaded_file, selected_card, uploaded_file2, file2_ext)
                 
                 st.session_state.df_final = df_res
                 st.session_state.df_duplicates = df_dup
                 st.session_state.failed_lines = failed_lines
+                st.session_state.merge_groups = merge_groups
                 st.session_state.stats = stats
                 st.session_state.output_filename = uploaded_file.name.rsplit('.', 1)[0]
                 st.session_state.selected_card = selected_card
@@ -650,7 +641,7 @@ if st.button("🚀 تشغيل المحرك الجبري (استخراج ودمج
                 if df_res.empty:
                     st.error("لم يتم العثور على بيانات جداول متوافقة. يرجى التأكد من محتوى الملف.")
                 else:
-                    st.success(f"استخراج أولي: تم استخراج {len(df_res)} سجلّاً؛ فشل في استخراج {len(failed_lines)} سطر (سجّل للتدقيق).")
+                    st.success(f"استخراج أولي: تم استخراج {len(df_res)} سجلّاً؛ فشل في استخراج {len(failed_lines)} سطر؛ مجموعات دمج مُسجلة {len(merge_groups)}.")
             except Exception as e:
                 st.error(f"خطأ غير متوقع أثناء المعالجة: {e}")
                 st.error(traceback.format_exc())
@@ -658,12 +649,13 @@ if st.button("🚀 تشغيل المحرك الجبري (استخراج ودمج
         st.warning("الرجاء رفع ملف الكشف الأساسي (Word) أولاً.")
 
 # -------------------------------------------------------------------------
-# بعد المعالجة: تنزيل التقارير + لوج الفشل
+# بعد المعالجة: تنزيل التقارير + لوج الفشل + لوج المجموعات
 # -------------------------------------------------------------------------
 if st.session_state.processing_done:
     df_final = st.session_state.df_final
     df_duplicates = st.session_state.df_duplicates
     failed_lines = st.session_state.failed_lines
+    merge_groups = st.session_state.merge_groups
     stats = st.session_state.stats
     output_filename = st.session_state.output_filename
     used_card_type = st.session_state.selected_card
@@ -702,6 +694,7 @@ if st.session_state.processing_done:
         "عدد السجلات المستخرجة": stats.get("parsed_count", 0),
         "عدد الأسطر الفاشلة": stats.get("failed_count", 0),
         "عدد التكرارات المعزولة": stats.get("duplicates_count", 0),
+        "عدد مجموعات الدمج المسجلة": stats.get("merge_groups_count", 0),
     })
 
     # عرض عيّنة من failed_lines مع سبب الفشل
@@ -725,12 +718,36 @@ if st.session_state.processing_done:
             mime="text/csv"
         )
 
-    # عرض نصي: نصائح سريعة بناءً على أسباب الفشل الشائعة
+    # عرض لوج merge_groups (مجموعات الدمج)
+    if merge_groups:
+        st.markdown("### أمثلة على مجموعات الدمج (merge groups)")
+        # نعرض أول 200 مجموعة
+        mg_sample = merge_groups[:200]
+        df_mg = pd.DataFrame([(str(idx_pair), merged_text, reason) for idx_pair, merged_text, reason in mg_sample],
+                             columns=["فهرس/نطاق", "النص المدموج", "السبب"])
+        st.dataframe(df_mg)
+
+        # تنزيل لوج المجموعات كـ CSV
+        csv_buf2 = StringIO()
+        writer2 = csv.writer(csv_buf2)
+        writer2.writerow(["فهرس/نطاق", "النص المدموج", "السبب"])
+        for idx_pair, merged_text, reason in merge_groups:
+            writer2.writerow([str(idx_pair), merged_text, reason])
+        csv_buf2.seek(0)
+        st.download_button(
+            label="📥 تحميل لوج مجموعات الدمج (CSV)",
+            data=csv_buf2.getvalue(),
+            file_name=f"merge_groups_{output_filename}.csv",
+            mime="text/csv"
+        )
+
+    # عرض نصي: توصيات سريعة بناءً على أسباب الفشل الشائعة
     st.markdown("### توصيات سريعة لتحسين الاستخراج")
     st.markdown("""
     - إذا كانت معظم أسباب الفشل `html_table_unparsed` فالمستند يحتوي على جداول داخلية بصيغة HTML-like؛ أعد حفظ المستند كـ Word حقيقي (بدون HTML داخل الفقرات) أو زودني بنسخة من الصفحات الأولى لأقوم بتخصيص parser.
-    - إذا كانت الأسباب `no_arabic_name` أو `not_enough_numbers` فراجع تنسيق الأعمدة في الملف الأصلي (قد تكون الأسماء موزعة على خلايا متعددة أو أرقام البطاقات قصيرة).
-    - استخدم زر تنزيل لوج الفشل لمراجعة الأسطر يدوياً وإضافة قواعد استثنائية إذا لزم.
+    - إذا كانت الأسباب `no_arabic_name` أو `no_numbers` فراجع تنسيق الأعمدة في الملف الأصلي (قد تكون الأسماء موزعة على خلايا متعددة أو أرقام البطاقات قصيرة).
+    - راجع ملف `merge_groups_*.csv` لتتأكد من أن عمليات الدمج لم تدمج فقرات غير مرتبطة؛ إن وجدت حالات خاطئة أرسل لي أول 30 سطرًا من هذا الملف وسأعدل قواعد الدمج تلقائياً.
+    - بعد ضبط القواعد، أعد تشغيل المحرك وستصل إلى تغطية أقرب إلى 100% (678/678).
     """)
 
 # نهاية الملف
