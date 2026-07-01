@@ -123,72 +123,99 @@ def row_cells_unique(row):
 # -------------------------------------------------------------------------
 def _parse_docx_to_list(file_obj, card_choice, stop_on_error=False, debug_limit=0):
     """
-    دالة استخراج مُحسّنة:
-    - تتعامل مع خلايا مدموجة أفقياً بتخطي الخلايا المكررة
-    - تحاول استخراج جداول HTML-like داخل الفقرات
-    - تجمع الفقرات المتتالية إذا لزم الأمر
-    - تُرجع: parsed_records, failed_lines (قائمة tuples (line, reason))
+    نسخة محسّنة نهائية:
+    - تتعامل مع merged cells أفقياً وعمودياً (vMerge)
+    - تحلل HTML-like tables داخل الفقرات
+    - تجمع فقرات مبعثرة
+    - ترجع parsed_records, failed_lines, raw_lines_count
     """
+    from docx import Document
+    import re
     doc = Document(file_obj)
     parsed_records = []
     failed_lines = []
     raw_lines = []
 
     def parse_html_table_text(text):
-        # يستخرج محتويات <td> ويفكّها إلى صفوف بناءً على عدد أعمدة محتمل
         tds = re.findall(r'<td[^>]*>(.*?)</td>', text, flags=re.DOTALL | re.IGNORECASE)
         tds = [re.sub(r'<.*?>', '', td).replace('\n', ' ').strip() for td in tds]
         rows = []
         if not tds:
             return rows
-        # نحاول تقسيم إلى أعمدة شائعة
         for cols in (8,7,6,5,4):
             if len(tds) % cols == 0:
                 for i in range(0, len(tds), cols):
                     rows.append(' | '.join(tds[i:i+cols]))
                 return rows
-        # افتراضي: كل مجموعة td تمثل صفاً واحداً
         rows.append(' | '.join(tds))
         return rows
 
-    # 1) استخراج كل صفوف الجداول الحقيقية (مع الحفاظ على الخلايا الفارغة)
+    def classify_failure_reason(line):
+        if not line or not line.strip(): return "empty_line"
+        if '<td' in line.lower() or '<table' in line.lower(): return "html_table_unparsed"
+        if not re.search(r'[\u0600-\u06FF]{2,}', line): return "no_arabic_name"
+        if len(re.findall(r'\b\d{1,}\b', line)) < 1: return "no_numbers"
+        return "ambiguous_format"
+
+    # --- 1) استخراج صفوف الجداول الحقيقية مع معالجة vMerge عمودي و merged أفقياً ---
     for table in doc.tables:
+        prev_row_texts = []
         for row in table.rows:
-            # استخدم row_cells_unique لتفادي الخلايا المكررة بسبب merged cells أفقياً
-            cells = [c.text.replace('\n', ' ').strip() for c in row_cells_unique(row)]
-            # حافظ على عدد الأعمدة الفارغة كـ '' بدلاً من تجاهلها
-            line = " | ".join(cells)
+            # نقرأ كل خلية مع مراعاة الخلايا المدموجة أفقياً بتخطي نفس _tc
+            cells = []
+            seen = set()
+            for cell in row.cells:
+                tc = cell._tc
+                if tc in seen:
+                    continue
+                seen.add(tc)
+                # فحص vMerge داخل خصائص الخلية
+                tcPr = tc.tcPr
+                vmerge = None
+                if tcPr is not None:
+                    vm = tcPr.find(qn('w:vMerge'))
+                    if vm is not None:
+                        vmerge = vm.get(qn('w:val')) if vm.get(qn('w:val')) is not None else "continue"
+                text = cell.text.replace('\n', ' ').strip()
+                cells.append((text, vmerge))
+            # الآن نحلّ مشكلة vMerge عمودي: إذا vMerge == 'continue' وخانة فارغة، نأخذ نص من prev_row_texts في نفس الموضع
+            resolved = []
+            for i, (txt, vmerge) in enumerate(cells):
+                if vmerge and vmerge.lower() == 'continue':
+                    # حاول أخذ النص من prev_row_texts بنفس الفهرس إن وجد
+                    if i < len(prev_row_texts):
+                        resolved.append(prev_row_texts[i])
+                    else:
+                        resolved.append(txt)
+                else:
+                    resolved.append(txt)
+            prev_row_texts = resolved[:]  # للاستخدام في الصف التالي
+            line = " | ".join([r for r in resolved])
             if line.strip():
                 raw_lines.append(line)
 
-    # 2) فحص الفقرات: نص عادي أو HTML-like table
-    # نجمع فقرات متتالية التي قد تكون جزءاً من نفس السجل (heuristic)
+    # --- 2) فحص الفقرات (نحلل HTML-like أو نجمع فقرات قصيرة) ---
     buffer_para = ""
     for para in doc.paragraphs:
         txt = para.text.strip()
         if not txt:
-            # فاصل؛ إذا كان هناك buffer، خزّنه
             if buffer_para:
                 raw_lines.append(buffer_para.strip())
                 buffer_para = ""
             continue
-        if '<table' in txt.lower() or '<td' in txt.lower():
-            # تحليل HTML-like داخل الفقرة
-            try:
-                rows = parse_html_table_text(txt)
-                if rows:
-                    raw_lines.extend(rows)
-                else:
-                    raw_lines.append(txt)
-            except Exception:
+        low = txt.lower()
+        if '<table' in low or '<td' in low:
+            rows = parse_html_table_text(txt)
+            if rows:
+                raw_lines.extend(rows)
+            else:
                 raw_lines.append(txt)
             continue
-        # إذا الفقرة قصيرة جداً ونهاية سطر سابق لا تحتوي اسم، نجمعها
+        # تجميع فقرات قصيرة مع السطر السابق
         if len(txt.split()) < 4:
             buffer_para += " " + txt
         else:
             if buffer_para:
-                # اجمع buffer مع الفقرة الحالية وحاول كخط واحد
                 combined = (buffer_para + " " + txt).strip()
                 raw_lines.append(combined)
                 buffer_para = ""
@@ -197,31 +224,29 @@ def _parse_docx_to_list(file_obj, card_choice, stop_on_error=False, debug_limit=
     if buffer_para:
         raw_lines.append(buffer_para.strip())
 
-    # 3) الآن نحلل كل raw_line لاستخراج الاسم والأرقام
+    # --- 3) تحليل كل raw_line لاستخراج الاسم والأرقام مع قواعد مرنة ---
+    header_keywords = ["المركز", "اسم رب", "ملاحظات", "الوكيل", "الافراد", "الكلية", "المحجوبين", "FOOD", "نوع الوكالة", "ت رقم البطاقة", "اجمالي", "المجموع"]
     for idx, line in enumerate(raw_lines):
         try:
             line_clean = line.replace(',', ' ').replace('،', ' ').replace('-', ' ')
-            # تجاهل رؤوس أو كلمات ثابتة فقط إذا هي رؤوس واضحة
-            header_keywords = ["المركز", "اسم رب", "ملاحظات", "الوكيل", "الافراد", "الكلية", "المحجوبين", "FOOD", "نوع الوكالة", "ت رقم البطاقة"]
-            if any(re.search(r'\b' + re.escape(w) + r'\b', line_clean, flags=re.IGNORECASE) for w in header_keywords):
-                # لكن لا نحذف كل سطر يحتوي هذه الكلمات إذا بدا كسجل (يحتوي اسم عربي وأرقام)
+            # تجاهل رؤوس واضحة فقط (نستخدم تطابق بداية السطر أو كلمة كاملة)
+            if any(re.search(r'^\s*' + re.escape(w) + r'\b', line_clean, flags=re.IGNORECASE) for w in header_keywords):
+                # لكن إذا بدا كسجل (اسم عربي + أرقام) لا نتجاهله
                 if not (re.search(r'[\u0600-\u06FF]{2,}', line_clean) and re.search(r'\d', line_clean)):
                     continue
 
-            # استخراج أرقام (نقبل أرقام بطول >=4 كمرشّح للبطاقة)
+            # أرقام بطاقات (نقبل أصفار بادئة)
             all_nums = re.findall(r'\b0*\d{4,}\b', line_clean)
-            # استخراج أرقام صغيرة (1-3 خانات) للـ كلي/مستحق/محجوب
+            # أرقام صغيرة للكلي/مستحق/محجوب
             smalls_all = re.findall(r'\b\d{1,3}\b', line_clean)
 
-            # استخراج أسماء عربية قوية (سلسلة كلمات عربية)
+            # استخراج اسم عربي قوي
             name_matches = re.findall(r'[\u0600-\u06FF]{2,}(?:\s+[\u0600-\u06FF]{2,})*', line_clean)
             name = None
             if name_matches:
-                # نأخذ أطول تطابق غالباً الاسم الكامل
                 name = max(name_matches, key=len).strip()
 
             if not name:
-                # محاولة بديلة: إذا وجدنا خلية ثالثة أو رابع تحتوي نص عربي في تقسيم بـ '|'
                 parts = [p.strip() for p in re.split(r'\||\t', line_clean) if p.strip()]
                 for p in parts:
                     if re.search(r'[\u0600-\u06FF]{2,}', p):
@@ -233,14 +258,13 @@ def _parse_docx_to_list(file_obj, card_choice, stop_on_error=False, debug_limit=
                 failed_lines.append((line, reason))
                 continue
 
-            # تحديد أرقام البطاقة: نعتبر أطول رقم >=4 كرقم بطاقة حديث
+            # رقم البطاقة: أطول رقم >=4 نعتبره حديث
             cards = [n for n in all_nums if len(n) >= 4]
             old_card = cards[0] if cards else "غير متوفر"
             new_card = cards[-1] if len(cards) >= 2 else old_card
             selected_card = new_card if card_choice == "رقم البطاقة الحديث" else old_card
 
-            # استخراج أعداد (الكلي، مستحق، محجوب) بمحاولة ذكية حول موقع الاسم
-            # نبحث عن أرقام صغيرة بعد الاسم أولاً
+            # أعداد: نفضّل الأرقام بعد الاسم
             idx_name = line_clean.find(name.split()[0])
             before = line_clean[:idx_name] if idx_name >= 0 else ""
             after = line_clean[idx_name + len(name):] if idx_name >= 0 else line_clean
@@ -249,7 +273,6 @@ def _parse_docx_to_list(file_obj, card_choice, stop_on_error=False, debug_limit=
             smalls_after = [int(n) for n in re.findall(r'\b\d{1,3}\b', after)]
 
             total = eligible = withheld = 0
-            # قواعد مرنة: نفضّل الأرقام بعد الاسم إن وُجدت
             nums = smalls_after if len(smalls_after) >= 1 else smalls_before
             if len(nums) >= 3:
                 total, eligible, withheld = nums[0], nums[1], nums[2]
@@ -260,7 +283,6 @@ def _parse_docx_to_list(file_obj, card_choice, stop_on_error=False, debug_limit=
                 total = nums[0]
                 eligible = withheld = 0
             else:
-                # محاولة أخيرة: أرقام عامة في السطر (غير مقسمة)
                 all_smalls = [int(n) for n in re.findall(r'\b\d{1,3}\b', line_clean)]
                 if len(all_smalls) >= 3:
                     total, eligible, withheld = all_smalls[-3], all_smalls[-2], all_smalls[-1]
@@ -272,6 +294,11 @@ def _parse_docx_to_list(file_obj, card_choice, stop_on_error=False, debug_limit=
                     failed_lines.append((line, reason))
                     continue
 
+            # تجاهل صفوف المجموعات التي تظهر كـ "اجمالي ..." إذا كانت ليست سجل فردي
+            if re.search(r'^\s*(اجمالي|المجموع|مجموع)\b', name):
+                # إذا احتوى السطر على أرقام كبيرة جداً أو كان ملخصاً، لا نضيف كسجل
+                continue
+
             parsed_records.append({
                 "اسم رب الأسرة": name,
                 "رقم البطاقة": selected_card,
@@ -280,17 +307,17 @@ def _parse_docx_to_list(file_obj, card_choice, stop_on_error=False, debug_limit=
                 "مستحق": eligible
             })
 
-            # debug limit: لتجارب سريعة
             if debug_limit and len(parsed_records) >= debug_limit:
                 break
 
         except Exception as e:
             failed_lines.append((line, f"exception:{str(e)}"))
-            # استمر في المعالجة ما لم يطلب التوقف
             if stop_on_error:
                 raise
 
-    return parsed_records, failed_lines
+    # إحصاء خطوط خام
+    raw_count = len(raw_lines)
+    return parsed_records, failed_lines, raw_count
 
 # -------------------------------------------------------------------------
 # وحدة الاستخراج من Excel/CSV (ثابتة مع تحسين طفيف)
