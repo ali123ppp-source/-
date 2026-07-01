@@ -99,9 +99,11 @@ def extract_and_clean_data(file_obj):
     for table in doc.tables:
         for row in table.rows:
             cells = [cell.text.strip().replace('\n', ' ') for cell in row.cells]
+            # تخطي صفوف العناوين الرئيسية والفرعية
             if not any(cells) or "المركز" in "".join(cells) or "الوكيل" in "".join(cells) or "اسم رب" in "".join(cells):
                 continue
             
+            # 1. تحديد مكان الاسم (أطول نص عربي خالي من الأرقام)
             name_idx = -1
             max_len = 0
             for i, c in enumerate(cells):
@@ -111,11 +113,21 @@ def extract_and_clean_data(file_obj):
                         name_idx = i
             if name_idx == -1: continue
             
+            # 2. تحديد مكان التسلسل الأصلي (ت) للمواطن
+            # نبحث عن الخلية الرقمية الصغيرة التي تقع قبل اسم المواطن وعادة تكون في العمود الأول (المؤشر 0 أو 1)
+            orig_seq = ""
+            for i in range(name_idx):
+                if cells[i].isdigit() and int(cells[i]) < 500: # التسلسل نادراً ما يتجاوز هذا الرقم في الكشف الواحد
+                    orig_seq = cells[i]
+                    break
+            
+            # 3. سحب رقم البطاقة القديم (الرقم المكون من 5 خانات فأكثر)
             card_indices = [i for i, c in enumerate(cells) if c.isdigit() and len(c) >= 5]
             if not card_indices: continue
             
             old_card_num = cells[card_indices[0]]
             
+            # 4. استخراج حقول الأرقام (محجوب، مستحق، كلي)
             digit_cells = [int(cells[i]) for i in range(name_idx) if cells[i].isdigit()]
             if len(digit_cells) >= 3:
                 withheld, eligible, total = digit_cells[0], digit_cells[1], digit_cells[2]
@@ -125,6 +137,7 @@ def extract_and_clean_data(file_obj):
                 continue
                 
             raw_records.append({
+                "ت": orig_seq if orig_seq else len(raw_records) + 1, # ⭐ [تعديل]: اعتماد التسلسل الأصلي المأخوذ من الملف مباشرة
                 "اسم رب الأسرة": cells[name_idx],
                 "رقم البطاقة القديم": old_card_num,
                 "الكلي": total,
@@ -134,9 +147,7 @@ def extract_and_clean_data(file_obj):
             
     df = pd.DataFrame(raw_records)
     if not df.empty:
-        # ⭐ [تعديل مهم]: تم إلغاء سطر الترتيب الأبجدي (sort_values) للإبقاء على الترتيب الأصلي تماماً
         df = df.reset_index(drop=True)
-        df.insert(0, "ت", df.index + 1)
     return df
 
 # -----------------------------------------------------------------------------
@@ -227,7 +238,7 @@ def build_professional_word_report(df, filename_base):
     HEX_LIGHT_GREEN = "E8F8F5"
     HEX_ALERT_RED = "EC7063"
     
-    # تعبئة صفوف البيانات بنفس التسلسل الأصلي للملف المستورد
+    # تعبئة صفوف البيانات بنفس التسلسل الأصلي والأرقام التسلسلية الحقيقية للملف المستورد
     for idx, row in df.iterrows():
         row_cells = table.add_row().cells
         
@@ -247,7 +258,7 @@ def build_professional_word_report(df, filename_base):
             cell_align = "center"
             font_size = 16
             
-            if i == 0: val = row["ت"]
+            if i == 0: val = row["ت"]  # هنا يتم عرض تسلسل المواطن الأصلي المستخرج
             elif i == 1: 
                 val = row["اسم رب الأسرة"]
                 cell_align = "left" 
@@ -304,7 +315,7 @@ def build_professional_word_report(df, filename_base):
 # واجهة استخدام التطبيق (Streamlit Interface)
 # -----------------------------------------------------------------------------
 st.markdown("<h3 style='text-align: right;'>📂 رفع الكشف المراد تدقيقه وتنسيقه للمطبعة</h3>", unsafe_allow_html=True)
-uploaded_file = st.file_uploader("ارفع كشف الوكلاء", type=['docx'], key="doc_input_v7", label_visibility="collapsed")
+uploaded_file = st.file_uploader("ارفع كشف الوكلاء", type=['docx'], key="doc_input_v8", label_visibility="collapsed")
 
 st.markdown("<br>", unsafe_allow_html=True)
 
@@ -315,7 +326,7 @@ if uploaded_file:
 
 if st.button("⚙️ تشغيل محرك التنظيم والتنسيق المتقدم الكلي"):
     if uploaded_file:
-        with st.spinner('جاري قراءة البيانات وإعداد التنسيق الشرطي والمقاييس بالتسلسل الأصلي...'):
+        with st.spinner('جاري قراءة البيانات والحفاظ على التسلسل الأصلي للمواطنين...'):
             try:
                 df_res = extract_and_clean_data(uploaded_file)
                 if not df_res.empty:
@@ -333,7 +344,7 @@ if st.session_state.processing_done:
     df_final = st.session_state.df_final
     output_filename = st.session_state.output_filename
     
-    st.success(f"✅ تم معالجة وتنسيق المستند بنفس التسلسل لـ ({len(df_final)}) قيد اسم.")
+    st.success(f"✅ تم معالجة وتنسيق المستند مع المحافظة على الأرقام التسلسلية الأصلية لـ ({len(df_final)}) قيد اسم.")
     
     with st.spinner('جاري صياغة وهيكلة مستند Word المطور...'):
         word_output = build_professional_word_report(df_final, output_filename)
