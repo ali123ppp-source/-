@@ -80,12 +80,12 @@ def format_cell_advanced(cell, text, bold=False, color_rgb=None, size_pt=16, fon
         run.font.size = Pt(size_pt)
 
 # -----------------------------------------------------------------------------
-# المحرك الذكي لقراءة وتنظيف البيانات (مقاوم للتمزق والتشوه)
+# المحرك الذكي لقراءة وتنظيف البيانات (النسخة المصححة)
 # -----------------------------------------------------------------------------
 def extract_and_clean_data(file_obj):
     doc = Document(file_obj)
     
-    # 1. سحب كل النصوص من المستند بغض النظر عن الجداول لمنع مشكلة التمزق
+    # سحب كل النصوص من المستند بغض النظر عن الجداول لمنع مشكلة التمزق
     all_text = []
     for p in doc.paragraphs:
         if p.text.strip(): all_text.append(p.text.strip())
@@ -108,14 +108,14 @@ def extract_and_clean_data(file_obj):
     while i < len(tokens):
         token = tokens[i]
         
-        # التقاط رقم بطاقة (الجديدة أو القديمة طولها بين 5 إلى 8 أرقام)
+        # التقاط رقم بطاقة (طولها بين 5 إلى 8 أرقام)
         if token.isdigit() and 5 <= len(token) <= 8:
             card = token
             
             if card not in seen_cards:
-                # تجميع البيانات المحيطة بالبطاقة (نافذة من 15 كلمة قبل وبعد)
-                start_idx = max(0, i - 15)
-                end_idx = min(len(tokens), i + 15)
+                # تجميع البيانات المحيطة بالبطاقة (نافذة من 12 كلمة قبل وبعد)
+                start_idx = max(0, i - 12)
+                end_idx = min(len(tokens), i + 12)
                 window = tokens[start_idx:end_idx]
                 
                 # استخراج الاسم العربي
@@ -127,16 +127,17 @@ def extract_and_clean_data(file_obj):
                 
                 # استخراج التسلسل الأصلي
                 orig_seq = ""
-                for j in range(i-1, max(0, i-10), -1):
+                for j in range(i-1, max(0, i-6), -1):
                     if tokens[j].isdigit() and 1 <= len(tokens[j]) <= 3:
                         orig_seq = tokens[j]
                         break
                 
                 # التحقق من اكتمال القيد
                 if clean_name and len(nums) >= 3:
-                    total = nums[0]
-                    eligible = nums[1]
-                    withheld = nums[2]
+                    # نأخذ آخر 3 أرقام صغيرة تم التقاطها لتجنب رقم التسلسل
+                    total = nums[-3]
+                    eligible = nums[-2]
+                    withheld = nums[-1]
                     
                     # ترتيب منطقي للأفراد: الرقم الكلي يجب أن يكون الأكبر دائماً
                     if total < eligible:
@@ -151,15 +152,18 @@ def extract_and_clean_data(file_obj):
                         "محجوب": withheld
                     })
                     
-                    # منع التكرار: إضافة البطاقة وأي بطاقة أخرى مجاورة في نفس القيد إلى الذاكرة
-                    for w in window:
-                        if w.isdigit() and 5 <= len(w) <= 8:
-                            seen_cards.add(w)
+                    # إضافة البطاقة الحالية فقط والبطاقة الملاصقة لها (القديمة/الحديثة) لمنع التكرار الشرعي
+                    # دون المساس ببطاقات المواطنين الآخرين في النافذة
+                    seen_cards.add(card)
+                    for j in range(i-1, i+2):
+                        if 0 <= j < len(tokens) and tokens[j].isdigit() and 5 <= len(tokens[j]) <= 8:
+                            seen_cards.add(tokens[j])
         i += 1
         
-    # البناء الآمن للجدول (لمنع خطأ ValueError نهائياً)
+    # البناء الآمن للجدول وإزالة أي تكرار متطابق بالاسم
     if raw_records:
         df = pd.DataFrame(raw_records)
+        df = df.drop_duplicates(subset=["اسم رب الأسرة"], keep="first")
         return df
     else:
         # إرجاع جدول فارغ مهيأ بالأعمدة في حال كان الملف غير مقروء
