@@ -80,12 +80,11 @@ def format_cell_advanced(cell, text, bold=False, color_rgb=None, size_pt=16, fon
         run.font.size = Pt(size_pt)
 
 # -----------------------------------------------------------------------------
-# المحرك الذكي لقراءة وتنظيف البيانات (النسخة المصححة)
+# المحرك الذكي المطلق (التمركز حول الأسماء) - مقاوم للتمزق 100%
 # -----------------------------------------------------------------------------
 def extract_and_clean_data(file_obj):
     doc = Document(file_obj)
     
-    # سحب كل النصوص من المستند بغض النظر عن الجداول لمنع مشكلة التمزق
     all_text = []
     for p in doc.paragraphs:
         if p.text.strip(): all_text.append(p.text.strip())
@@ -98,75 +97,88 @@ def extract_and_clean_data(file_obj):
     full_text = " ".join(all_text)
     tokens = full_text.split()
     
-    raw_records = []
-    seen_cards = set()
+    # الكلمات المحجوزة لتخطيها وعدم اعتبارها أسماء مواطنين
+    stop_words = {"نوع", "الوكالة", "رقم", "المركز", "البطاقة", "القديم", "اسم", "رب", "الاسرة", "الافراد", "الكلية", "المستحقة", "المحجوبين", "ت", "القديمة", "الحديثة", "FOOD"}
     
-    # كلمات محجوزة يجب استبعادها من الأسماء
-    stop_words = {"اسم", "رب", "الاسرة", "نوع", "الوكالة", "رقم", "المركز", "ت", "البطاقة", "القديم", "الافراد", "الكلية", "المستحقة", "المحجوبين"}
+    records = []
+    seen_names = set()
     
     i = 0
     while i < len(tokens):
-        token = tokens[i]
-        
-        # التقاط رقم بطاقة (طولها بين 5 إلى 8 أرقام)
-        if token.isdigit() and 5 <= len(token) <= 8:
-            card = token
+        # البحث عن بداية اسم عربي صافي
+        if re.match(r'^[أ-ي]+$', tokens[i]) and tokens[i] not in stop_words:
+            name_start = i
+            while i < len(tokens) and re.match(r'^[أ-ي]+$', tokens[i]) and tokens[i] not in stop_words:
+                i += 1
+            name_end = i
+            name_len = name_end - name_start
             
-            if card not in seen_cards:
-                # تجميع البيانات المحيطة بالبطاقة (نافذة من 12 كلمة قبل وبعد)
-                start_idx = max(0, i - 12)
-                end_idx = min(len(tokens), i + 12)
-                window = tokens[start_idx:end_idx]
+            # إذا كان الاسم مكون من كلمتين أو أكثر، فهو اسم مواطن مؤكد
+            if name_len >= 2: 
+                name = " ".join(tokens[name_start:name_end])
                 
-                # استخراج الاسم العربي
-                name_words = [w for w in window if re.match(r'^[أ-ي]+$', w) and w not in stop_words]
-                clean_name = " ".join(name_words)
-                
-                # استخراج الأرقام الصغيرة (أعداد الأفراد)
-                nums = [int(w) for w in window if w.isdigit() and len(w) <= 2]
-                
-                # استخراج التسلسل الأصلي
-                orig_seq = ""
-                for j in range(i-1, max(0, i-6), -1):
-                    if tokens[j].isdigit() and 1 <= len(tokens[j]) <= 3:
-                        orig_seq = tokens[j]
-                        break
-                
-                # التحقق من اكتمال القيد
-                if clean_name and len(nums) >= 3:
-                    # نأخذ آخر 3 أرقام صغيرة تم التقاطها لتجنب رقم التسلسل
-                    total = nums[-3]
-                    eligible = nums[-2]
-                    withheld = nums[-1]
+                if name not in seen_names:
+                    seen_names.add(name)
                     
-                    # ترتيب منطقي للأفراد: الرقم الكلي يجب أن يكون الأكبر دائماً
-                    if total < eligible:
-                        total, eligible = eligible, total
+                    # إنشاء نافذة بحث محيطة بالاسم فقط لسحب بيانات هذا المواطن حصراً
+                    window_start = max(0, name_start - 12)
+                    window_end = min(len(tokens), name_end + 12)
+                    window = tokens[window_start:window_end]
+                    
+                    cards = [t for t in window if t.isdigit() and 5 <= len(t) <= 8]
+                    small_nums = [int(t) for t in window if t.isdigit() and len(t) <= 3]
+                    
+                    if cards and len(small_nums) >= 3:
+                        # سحب البطاقة القديمة (غالباً تبدأ بصفر)
+                        old_card = cards[-1]
+                        for c in cards:
+                            if c.startswith('0'):
+                                old_card = c
+                                break
+                                
+                        total, elig, withh = 0, 0, 0
+                        found = False
+                        # البحث عن المعادلة الرياضية الصحيحة (الكلي = المستحق + المحجوب)
+                        for j in range(len(small_nums)-2):
+                            a, b, c = small_nums[j], small_nums[j+1], small_nums[j+2]
+                            if a == b + c:
+                                total, elig, withh = a, b, c
+                                found = True
+                                break
+                            elif c == a + b:
+                                total, elig, withh = c, b, a
+                                found = True
+                                break
                         
-                    raw_records.append({
-                        "ت": orig_seq if orig_seq else str(len(raw_records) + 1),
-                        "اسم رب الأسرة": clean_name,
-                        "رقم البطاقة القديم": card,
-                        "الكلي": total,
-                        "مستحق": eligible,
-                        "محجوب": withheld
-                    })
-                    
-                    # إضافة البطاقة الحالية فقط والبطاقة الملاصقة لها (القديمة/الحديثة) لمنع التكرار الشرعي
-                    # دون المساس ببطاقات المواطنين الآخرين في النافذة
-                    seen_cards.add(card)
-                    for j in range(i-1, i+2):
-                        if 0 <= j < len(tokens) and tokens[j].isdigit() and 5 <= len(tokens[j]) <= 8:
-                            seen_cards.add(tokens[j])
-        i += 1
-        
-    # البناء الآمن للجدول وإزالة أي تكرار متطابق بالاسم
-    if raw_records:
-        df = pd.DataFrame(raw_records)
-        df = df.drop_duplicates(subset=["اسم رب الأسرة"], keep="first")
-        return df
+                        if not found:
+                            a, b, c = small_nums[-3], small_nums[-2], small_nums[-1]
+                            total = max(a, b, c)
+                            if a == total: elig, withh = b, c
+                            elif c == total: elig, withh = b, a
+                            else: elig, withh = a, c
+                            
+                        # سحب التسلسل الأصلي الدقيق من قبل الاسم مباشرة
+                        seq = ""
+                        before_name = tokens[max(0, name_start - 5):name_start]
+                        for t in before_name:
+                            if t.isdigit() and 1 <= len(t) <= 3:
+                                seq = t
+                                break
+                                
+                        records.append({
+                            "ت": seq if seq else str(len(records) + 1),
+                            "اسم رب الأسرة": name,
+                            "رقم البطاقة القديم": old_card,
+                            "الكلي": total,
+                            "مستحق": elig,
+                            "محجوب": withh
+                        })
+        else:
+            i += 1
+            
+    if records:
+        return pd.DataFrame(records)
     else:
-        # إرجاع جدول فارغ مهيأ بالأعمدة في حال كان الملف غير مقروء
         return pd.DataFrame(columns=["ت", "اسم رب الأسرة", "رقم البطاقة القديم", "الكلي", "مستحق", "محجوب"])
 
 # -----------------------------------------------------------------------------
@@ -254,7 +266,6 @@ def build_professional_word_report(df, filename_base):
     HEX_LIGHT_GREEN = "E8F8F5"
     HEX_ALERT_RED = "EC7063"
     
-    # تعبئة صفوف البيانات
     for idx, row in df.iterrows():
         row_cells = table.add_row().cells
         
@@ -301,7 +312,6 @@ def build_professional_word_report(df, filename_base):
                 elif i == 4: set_cell_background(row_cells[i], HEX_LIGHT_GREEN)  
                 elif i == 5: set_cell_background(row_cells[i], HEX_LIGHT_RED)    
 
-    # محرك الإحصاء والمجموع الكلي
     total_all = df["الكلي"].astype(int).sum()
     total_eligible = df["مستحق"].astype(int).sum()
     total_withheld = df["محجوب"].astype(int).sum()
@@ -331,7 +341,7 @@ def build_professional_word_report(df, filename_base):
 # واجهة الاستخدام (Streamlit Interface)
 # -----------------------------------------------------------------------------
 st.markdown("<h3 style='text-align: right;'>📂 رفع الكشف المراد تدقيقه وتنسيقه للمطبعة</h3>", unsafe_allow_html=True)
-uploaded_file = st.file_uploader("ارفع كشف الوكلاء", type=['docx'], key="doc_input_v9", label_visibility="collapsed")
+uploaded_file = st.file_uploader("ارفع كشف الوكلاء", type=['docx'], key="doc_input_v10", label_visibility="collapsed")
 
 st.markdown("<br>", unsafe_allow_html=True)
 
@@ -342,7 +352,7 @@ if uploaded_file:
 
 if st.button("⚙️ تشغيل محرك التنظيم والتنسيق المتقدم الكلي"):
     if uploaded_file:
-        with st.spinner('جاري قراءة البيانات الممزقة وإعادة تجميعها بذكاء مع الحفاظ على التسلسل...'):
+        with st.spinner('جاري قراءة البيانات الممزقة وإعادة تجميعها حول الأسماء بذكاء...'):
             try:
                 df_res = extract_and_clean_data(uploaded_file)
                 if not df_res.empty:
