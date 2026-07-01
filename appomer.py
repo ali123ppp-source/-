@@ -254,7 +254,7 @@ def _parse_docx_to_list(file_obj, card_choice, stop_on_error=False, debug_limit=
                 continue
 
             if arabic_re.search(line) and i + 1 < n and arabic_re.search(raw_lines[i+1]) and len(line.split()) <= 2:
-                if re.search(r'\d', raw_lines[i+1]):
+                if re.search(r'\d', raw_lines[i+1]) or len(raw_lines[i+1].split()) > 2:
                     merged.append(line + " " + raw_lines[i+1].strip())
                     merge_groups.append(((i, i+1), line + " " + raw_lines[i+1].strip(), "split_name_merge"))
                     i += 2
@@ -721,7 +721,6 @@ if st.session_state.processing_done:
     # عرض لوج merge_groups (مجموعات الدمج)
     if merge_groups:
         st.markdown("### أمثلة على مجموعات الدمج (merge groups)")
-        # نعرض أول 200 مجموعة
         mg_sample = merge_groups[:200]
         df_mg = pd.DataFrame([(str(idx_pair), merged_text, reason) for idx_pair, merged_text, reason in mg_sample],
                              columns=["فهرس/نطاق", "النص المدموج", "السبب"])
