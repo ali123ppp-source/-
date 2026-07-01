@@ -93,7 +93,6 @@ def format_cell_advanced(cell, text, bold=False, color_rgb=None, size_pt=16, fon
 # دالة تصنيف سبب الفشل (لوج)
 # -------------------------------------------------------------------------
 def classify_failure_reason(line):
-    """تعطي سبب محتمل لفشل استخراج السطر"""
     if not line or not line.strip():
         return "empty_line"
     if '<td' in line.lower() or '<table' in line.lower():
@@ -104,11 +103,7 @@ def classify_failure_reason(line):
         return "no_numbers"
     return "ambiguous_format"
 
-# -------------------------------------------------------------------------
-# دالة مساعدة: توليد خلايا فريدة لتفادي مشاكل الخلايا المدموجة
-# -------------------------------------------------------------------------
 def row_cells_unique(row):
-    """يتجاهل الخلايا المكررة الناتجة عن merged cells أفقياً"""
     seen = set()
     for cell in row.cells:
         tc = cell._tc
@@ -118,16 +113,13 @@ def row_cells_unique(row):
         yield cell
 
 # -------------------------------------------------------------------------
-# دالة تحليل DOCX محسّنة وشاملة (مدموجة مع merge_groups)
+# دالة تحليل DOCX محسّنة ومحصنة بالكامل (الإصدار الجديد)
 # -------------------------------------------------------------------------
 def _parse_docx_to_list(file_obj, card_choice, stop_on_error=False, debug_limit=0):
     """
-    دالة محسّنة نهائية:
-    - تتعامل مع merged cells أفقياً وعمودياً (vMerge restart/continue)
-    - تحلل HTML-like tables داخل الفقرات
-    - تجمع فقرات مبعثرة
-    - تدمج الأسطر المبعثرة قبل التحليل
-    - ترجع parsed_records, failed_lines, raw_lines_count, merge_groups
+    نسخة احترافية مطورة ومحصنة بالكامل:
+    - تعالج الأسماء المكتوبة على أكثر من سطر (Multi-line) دون تداخل السجلات.
+    - تستخرج أعداد الأفراد بدقة بالاعتماد على المعادلة الرياضية (الكلي = مستحق + محجوب).
     """
     doc = Document(file_obj)
     parsed_records = []
@@ -149,7 +141,7 @@ def _parse_docx_to_list(file_obj, card_choice, stop_on_error=False, debug_limit=
         rows.append(' | '.join(tds))
         return rows
 
-    # --- 1) استخراج صفوف الجداول الحقيقية مع معالجة vMerge عمودي و merged أفقياً ---
+    # --- 1) استخراج صفوف الجداول الحقيقية بدقة ---
     for table in doc.tables:
         prev_row_texts = []
         for row in table.rows:
@@ -185,172 +177,127 @@ def _parse_docx_to_list(file_obj, card_choice, stop_on_error=False, debug_limit=
             if line.strip():
                 raw_lines.append(line)
 
-    # --- 2) فحص الفقرات: HTML-like أو تجميع فقرات قصيرة ---
-    buffer_para = ""
+    # --- 2) استخراج الفقرات النصية خارج الجداول (بما فيها HTML) ---
     for para in doc.paragraphs:
         txt = para.text.strip()
-        if not txt:
-            if buffer_para:
-                raw_lines.append(buffer_para.strip())
-                buffer_para = ""
-            continue
-        low = txt.lower()
-        if '<table' in low or '<td' in low:
+        if not txt: continue
+        if '<table' in txt.lower() or '<td' in txt.lower():
             rows = parse_html_table_text(txt)
-            if rows:
-                raw_lines.extend(rows)
-            else:
-                raw_lines.append(txt)
-            continue
-        if len(txt.split()) < 4:
-            buffer_para += " " + txt
+            if rows: raw_lines.extend(rows)
+            else: raw_lines.append(txt)
         else:
-            if buffer_para:
-                combined = (buffer_para + " " + txt).strip()
-                raw_lines.append(combined)
-                buffer_para = ""
-            else:
-                raw_lines.append(txt)
-    if buffer_para:
-        raw_lines.append(buffer_para.strip())
+            raw_lines.append(txt)
 
-    # --- 2.5) مرحلة ذكية لدمج الأسطر المبعثرة (pre-merge) ---
-    def merge_fragmented_lines(raw_lines, max_group=4):
-        merged = []
-        i = 0
-        n = len(raw_lines)
-        arabic_re = re.compile(r'[\u0600-\u06FF]')
-        numeric_only_re = re.compile(r'^\s*(?:\d+\s*)+$')
-        short_nums_re = re.compile(r'^\s*(?:\d{1,3}\s+){1,}\d{1,3}\s*$')
-        index_prefix_re = re.compile(r'^\s*\d+\s+')
-        while i < n:
-            line = raw_lines[i].strip()
-            if numeric_only_re.match(line) or (short_nums_re.match(line) and not arabic_re.search(line)):
-                if merged and arabic_re.search(merged[-1]):
-                    merged[-1] = merged[-1] + " " + line
-                    merge_groups.append(((i-1, i), merged[-1], "numbers_to_prev"))
-                    i += 1
-                    continue
-                if i + 1 < n and arabic_re.search(raw_lines[i+1]):
-                    combined = raw_lines[i+1].strip()
-                    merged.append(line + " " + combined)
-                    merge_groups.append(((i, i+1), line + " " + combined, "numbers_to_next"))
-                    i += 2
-                    continue
-                merged.append(line)
-                i += 1
+    # --- 3) التجميع الذكي للمقاطع المبعثرة بناءً على اكتمال السجل ---
+    final_records = []
+    current_name = []
+    current_cards = []
+    current_smalls = []
+
+    for line in raw_lines:
+        line_clean = line.replace(',', ' ').replace('،', ' ').replace('-', ' ')
+        cards_in_line = re.findall(r'\b\d{4,}\b', line_clean)
+        smalls_in_line = [int(n) for n in re.findall(r'\b\d{1,3}\b', line_clean)]
+        arabic_in_line = re.findall(r'[\u0600-\u06FF]{2,}', line_clean)
+        
+        # تخطي أسطر العناوين الصريحة
+        if any(w in line_clean for w in ["المركز", "نوع الوكالة", "الافراد الكلية"]):
+            if not (arabic_in_line and cards_in_line):
                 continue
 
-            if index_prefix_re.match(line) and not arabic_re.search(line) and i + 1 < n and arabic_re.search(raw_lines[i+1]):
-                merged.append(line + " " + raw_lines[i+1].strip())
-                merge_groups.append(((i, i+1), line + " " + raw_lines[i+1].strip(), "index_to_next_name"))
-                i += 2
-                continue
+        # إذا كان السطر يحتوي على اسم وبطاقة معاً فهو سجل كامل وجاهز
+        if arabic_in_line and cards_in_line:
+            if current_name and (current_cards or current_smalls):
+                final_records.append({
+                    "name": " ".join(current_name),
+                    "cards": current_cards,
+                    "smalls": current_smalls,
+                    "raw": "مقطع مجمع"
+                })
+                # تسجيل محاولة الدمج للإحصائيات
+                merge_groups.append((("تجميع", "ذكي"), " ".join(current_name), "سجل مكتمل"))
+                current_name, current_cards, current_smalls = [], [], []
+            
+            final_records.append({
+                "name": " ".join(arabic_in_line),
+                "cards": cards_in_line,
+                "smalls": smalls_in_line,
+                "raw": line
+            })
+        else:
+            # تجميع السجلات المقطعة عمودياً (Multi-line)
+            if arabic_in_line:
+                if current_name and current_cards:
+                    final_records.append({
+                        "name": " ".join(current_name),
+                        "cards": current_cards,
+                        "smalls": current_smalls,
+                        "raw": "مقطع مجمع"
+                    })
+                    merge_groups.append((("تجميع", "ذكي"), " ".join(current_name), "سجل مكتمل"))
+                    current_name, current_cards, current_smalls = [], [], []
+                current_name.extend(arabic_in_line)
+            
+            if cards_in_line:
+                current_cards.extend(cards_in_line)
+                
+            if smalls_in_line:
+                current_smalls.extend(smalls_in_line)
 
-            if arabic_re.search(line) and i + 1 < n and numeric_only_re.match(raw_lines[i+1].strip()):
-                merged.append(line + " " + raw_lines[i+1].strip())
-                merge_groups.append(((i, i+1), line + " " + raw_lines[i+1].strip(), "name_then_numbers"))
-                i += 2
-                continue
+    # إضافة القيد الأخير المتبقي
+    if current_name:
+        final_records.append({
+            "name": " ".join(current_name),
+            "cards": current_cards,
+            "smalls": current_smalls,
+            "raw": "مقطع نهائي"
+        })
 
-            if arabic_re.search(line) and i + 1 < n and arabic_re.search(raw_lines[i+1]) and len(line.split()) <= 2:
-                if re.search(r'\d', raw_lines[i+1]) or len(raw_lines[i+1].split()) > 2:
-                    merged.append(line + " " + raw_lines[i+1].strip())
-                    merge_groups.append(((i, i+1), line + " " + raw_lines[i+1].strip(), "split_name_merge"))
-                    i += 2
-                    continue
-
-            merged.append(line)
-            i += 1
-
-        final = []
-        i = 0
-        n = len(merged)
-        while i < n:
-            group = [merged[i]]
-            j = i + 1
-            while j < n and len(group) < max_group:
-                if not re.search(r'[\u0600-\u06FF]', " ".join(group)) and re.search(r'[\u0600-\u06FF]', merged[j]):
-                    group.append(merged[j])
-                    j += 1
-                    break
-                if numeric_only_re.match(merged[j]):
-                    group.append(merged[j])
-                    j += 1
-                    continue
-                break
-            if len(group) > 1:
-                merge_groups.append(((i, j-1), " ".join(group), "post_group_merge"))
-            final.append(" ".join(group))
-            i = j
-        return final
-
-    raw_lines = merge_fragmented_lines(raw_lines)
-
-    # --- 3) تحليل كل raw_line لاستخراج الاسم والأرقام مع قواعد مرنة ---
-    header_keywords = ["المركز", "اسم رب", "ملاحظات", "الوكيل", "الافراد", "الكلية", "المحجوبين", "FOOD", "نوع الوكالة", "ت رقم البطاقة", "اجمالي", "المجموع"]
-    for idx, line in enumerate(raw_lines):
+    # --- 4) تحليل استخراج الحقول النهائية لكل سجل مجمع ---
+    for record in final_records:
         try:
-            line_clean = line.replace(',', ' ').replace('،', ' ').replace('-', ' ')
-            if any(re.search(r'^\s*' + re.escape(w) + r'\b', line_clean, flags=re.IGNORECASE) for w in header_keywords):
-                if not (re.search(r'[\u0600-\u06FF]{2,}', line_clean) and re.search(r'\d', line_clean)):
-                    continue
+            name = record["name"].strip()
+            cards = record["cards"]
+            smalls = record["smalls"]
 
-            all_nums = re.findall(r'\b0*\d{4,}\b', line_clean)
-            smalls_all = re.findall(r'\b\d{1,3}\b', line_clean)
-
-            name_matches = re.findall(r'[\u0600-\u06FF]{2,}(?:\s+[\u0600-\u06FF]{2,})*', line_clean)
-            name = None
-            if name_matches:
-                name = max(name_matches, key=len).strip()
-
-            if not name:
-                parts = [p.strip() for p in re.split(r'\||\t', line_clean) if p.strip()]
-                for p in parts:
-                    if re.search(r'[\u0600-\u06FF]{2,}', p):
-                        name = p
-                        break
-
-            if not name:
-                reason = classify_failure_reason(line_clean)
-                failed_lines.append((line, reason))
+            if not name or not cards:
                 continue
 
-            cards = [n for n in all_nums if len(n) >= 4]
-            old_card = cards[0] if cards else "غير متوفر"
+            # استخراج رقم البطاقة المطلوب
+            old_card = cards[0]
             new_card = cards[-1] if len(cards) >= 2 else old_card
             selected_card = new_card if card_choice == "رقم البطاقة الحديث" else old_card
 
-            idx_name = line_clean.find(name.split()[0])
-            before = line_clean[:idx_name] if idx_name >= 0 else ""
-            after = line_clean[idx_name + len(name):] if idx_name >= 0 else line_clean
-
-            smalls_before = [int(n) for n in re.findall(r'\b\d{1,3}\b', before)]
-            smalls_after = [int(n) for n in re.findall(r'\b\d{1,3}\b', after)]
-
+            # عزل الأعداد الذكي بالاعتماد على التوازن الرياضي الحتمي
             total = eligible = withheld = 0
-            nums = smalls_after if len(smalls_after) >= 1 else smalls_before
-            if len(nums) >= 3:
-                total, eligible, withheld = nums[0], nums[1], nums[2]
-            elif len(nums) == 2:
-                total, eligible = nums[0], nums[1]
-                withheld = 0
-            elif len(nums) == 1:
-                total = nums[0]
-                eligible = withheld = 0
-            else:
-                all_smalls = [int(n) for n in re.findall(r'\b\d{1,3}\b', line_clean)]
-                if len(all_smalls) >= 3:
-                    total, eligible, withheld = all_smalls[-3], all_smalls[-2], all_smalls[-1]
-                elif len(all_smalls) == 2:
-                    total, eligible = max(all_smalls), min(all_smalls)
-                    withheld = 0
-                else:
-                    reason = classify_failure_reason(line_clean)
-                    failed_lines.append((line, reason))
-                    continue
+            found_counts = False
 
-            if re.search(r'^\s*(اجمالي|المجموع|مجموع)\b', name):
+            for i in range(len(smalls) - 2):
+                triplet = smalls[i:i+3]
+                # الحالة أ: الترتيب (الكلي، مستحق، محجوب)
+                if triplet[0] == triplet[1] + triplet[2] and triplet[0] > 0:
+                    total, eligible, withheld = triplet[0], triplet[1], triplet[2]
+                    found_counts = True
+                    break
+                # الحالة ب: الترتيب العكسي (محجوب، مستحق، الكلي)
+                if triplet[2] == triplet[0] + triplet[1] and triplet[2] > 0:
+                    withheld, eligible, total = triplet[0], triplet[1], triplet[2]
+                    found_counts = True
+                    break
+
+            # طريقة احتياطية مرنة
+            if not found_counts:
+                if len(smalls) >= 3:
+                    total, eligible, withheld = smalls[-3], smalls[-2], smalls[-1]
+                elif len(smalls) == 2:
+                    total, eligible = max(smalls), min(smalls)
+                    withheld = 0
+                elif len(smalls) == 1:
+                    total = smalls[0]
+                    eligible = withheld = 0
+
+            # استبعاد أسطر المجاميع
+            if any(w in name for w in ["اجمالي", "المجموع", "مجموع"]):
                 continue
 
             parsed_records.append({
@@ -365,7 +312,7 @@ def _parse_docx_to_list(file_obj, card_choice, stop_on_error=False, debug_limit=
                 break
 
         except Exception as e:
-            failed_lines.append((line, f"exception:{str(e)}"))
+            failed_lines.append((record.get("raw", ""), f"exception:{str(e)}"))
             if stop_on_error:
                 raise
 
@@ -373,7 +320,7 @@ def _parse_docx_to_list(file_obj, card_choice, stop_on_error=False, debug_limit=
     return parsed_records, failed_lines, raw_count, merge_groups
 
 # -------------------------------------------------------------------------
-# وحدة الاستخراج من Excel/CSV (ثابتة مع تحسين طفيف)
+# وحدة الاستخراج من Excel/CSV (ثابتة)
 # -------------------------------------------------------------------------
 def _parse_excel_to_list(file_obj, file_ext):
     records = []
@@ -410,13 +357,11 @@ def _parse_excel_to_list(file_obj, file_ext):
     return records
 
 # -------------------------------------------------------------------------
-# الماستر: الدمج والفرز والتنظيف (محدّث لاستقبال merge_groups)
+# الماستر: الدمج والفرز والتنظيف 
 # -------------------------------------------------------------------------
 def extract_and_clean_data(file_obj, card_choice, file_obj2=None, file2_ext=None, stop_on_error=False):
-    # 1. استخراج الأساسي (الآن يعيد parsed, failed, raw_count, merge_groups)
     parsed_primary, failed_primary, raw_count_primary, merge_groups_primary = _parse_docx_to_list(file_obj, card_choice, stop_on_error=stop_on_error)
     
-    # 2. استخراج ودمج الإضافي (إن وجد)
     parsed_secondary = []
     failed_secondary = []
     raw_count_secondary = 0
@@ -462,7 +407,7 @@ def extract_and_clean_data(file_obj, card_choice, file_obj2=None, file2_ext=None
     return df, df_duplicates, all_failed, all_merge_groups, stats
 
 # -------------------------------------------------------------------------
-# محرك بناء تقرير Word (ثابت)
+# محرك بناء تقرير Word
 # -------------------------------------------------------------------------
 def build_professional_word_report(df, filename_base, card_choice, is_duplicate_report=False):
     doc = Document()
@@ -721,6 +666,7 @@ if st.session_state.processing_done:
     # عرض لوج merge_groups (مجموعات الدمج)
     if merge_groups:
         st.markdown("### أمثلة على مجموعات الدمج (merge groups)")
+        # نعرض أول 200 مجموعة
         mg_sample = merge_groups[:200]
         df_mg = pd.DataFrame([(str(idx_pair), merged_text, reason) for idx_pair, merged_text, reason in mg_sample],
                              columns=["فهرس/نطاق", "النص المدموج", "السبب"])
