@@ -80,18 +80,21 @@ def format_cell_advanced(cell, text, bold=False, color_rgb=None, size_pt=16, fon
         run.font.size = Pt(size_pt)
 
 # -----------------------------------------------------------------------------
-# المحرك الجبار المطلق (هندسة الكيانات) - مضاد للتمزق والتداخل 100%
+# المحرك الجبار مع "حفار الـ XML" لالتقاط (مربعات النصوص Text Boxes)
 # -----------------------------------------------------------------------------
 def extract_and_clean_data(file_obj):
     doc = Document(file_obj)
     all_text = []
-    for p in doc.paragraphs:
-        if p.text.strip(): all_text.append(p.text.strip())
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                txt = cell.text.strip().replace('\n', ' ')
-                if txt: all_text.append(txt)
+    
+    # 🔥 الحل السحري: استخراج كل النصوص من الجذور (XML) حتى لو كانت داخل "مربع نص"
+    for p in doc.element.xpath('//w:p'):
+        para_text = ""
+        for t in p.xpath('.//w:t'):
+            if t.text:
+                para_text += t.text
+        clean_txt = para_text.strip().replace('\n', ' ')
+        if clean_txt:
+            all_text.append(clean_txt)
                 
     full_text = " ".join(all_text)
     tokens = full_text.split()
@@ -103,7 +106,7 @@ def extract_and_clean_data(file_obj):
 
     entities = []
     i = 0
-    # تحويل النصوص الممزقة إلى كيانات ذكية مستقلة
+    # تحويل النصوص إلى كيانات
     while i < len(tokens):
         t = tokens[i]
         if t.isdigit() and 5 <= len(t) <= 8:
@@ -121,7 +124,6 @@ def extract_and_clean_data(file_obj):
         else:
             i += 1
             
-    # 1. استخراج أسماء المواطنين الحقيقية فقط (من كلمتين فأكثر)
     unique_names = []
     seen = set()
     for e in entities:
@@ -130,14 +132,12 @@ def extract_and_clean_data(file_obj):
                 seen.add(e['val'])
                 unique_names.append(e)
 
-    # 2. استخراج المعادلات الحسابية الصحيحة فقط (الكلي = المستحق + المحجوب)
     num_entities = [e for e in entities if e['type'] == 'NUM']
     triplets = []
     used_num_indices = set()
     for j in range(len(num_entities)-2):
         e1, e2, e3 = num_entities[j], num_entities[j+1], num_entities[j+2]
         
-        # السماح بمسافة صغيرة بين الأرقام لتفادي التمزق
         if e3['idx'] - e1['idx'] <= 5:
             a, b, c = e1['val'], e2['val'], e3['val']
             if a == b + c or c == a + b:
@@ -158,11 +158,9 @@ def extract_and_clean_data(file_obj):
     
     records = []
     
-    # 3. ربط كل مواطن ببياناته الخاصة مهما كان مكانها في السطر الممزق
     for i, name_ent in enumerate(unique_names):
         n_idx = name_ent['idx']
         
-        # التقاط أقرب بطاقة
         best_card = ""
         best_card_dist = 9999
         best_c_idx = -1
@@ -175,7 +173,6 @@ def extract_and_clean_data(file_obj):
                     best_card = c_ent['val']
                     best_c_idx = c_ent['idx']
                     
-        # إعطاء الأولوية للبطاقة القديمة التي تبدأ بصفر
         for c_ent in all_cards:
             if c_ent['idx'] not in used_cards and c_ent['val'].startswith('0'):
                 dist = abs(c_ent['idx'] - n_idx)
@@ -190,7 +187,6 @@ def extract_and_clean_data(file_obj):
                 if abs(c_ent['idx'] - best_c_idx) <= 4:
                     used_cards.add(c_ent['idx'])
 
-        # التقاط أقرب معادلة أفراد
         best_trip = None
         best_trip_dist = 9999
         best_trip_idx = -1
@@ -210,7 +206,6 @@ def extract_and_clean_data(file_obj):
             total, elig, withh = 0, 0, 0
             trip_e_indices = []
 
-        # التقاط التسلسل الأصلي الفعلي للمواطن
         seq = str(i + 1)
         search_start = unique_names[i-1]['idx'] if i > 0 else 0
         for num_ent in num_entities:
@@ -229,6 +224,10 @@ def extract_and_clean_data(file_obj):
         })
         
     df = pd.DataFrame(records)
+    # ترتيب الجدول النهائي ليكون متناسقاً
+    if not df.empty:
+        df["ت_رقم"] = pd.to_numeric(df["ت"], errors='coerce').fillna(999)
+        df = df.sort_values(by="ت_رقم").drop(columns=["ت_رقم"]).reset_index(drop=True)
     return df
 
 # -----------------------------------------------------------------------------
@@ -391,7 +390,7 @@ def build_professional_word_report(df, filename_base):
 # واجهة الاستخدام (Streamlit Interface)
 # -----------------------------------------------------------------------------
 st.markdown("<h3 style='text-align: right;'>📂 رفع الكشف المراد تدقيقه وتنسيقه للمطبعة</h3>", unsafe_allow_html=True)
-uploaded_file = st.file_uploader("ارفع كشف الوكلاء", type=['docx'], key="doc_input_final_v2", label_visibility="collapsed")
+uploaded_file = st.file_uploader("ارفع كشف الوكلاء", type=['docx'], key="doc_input_final_v3", label_visibility="collapsed")
 
 st.markdown("<br>", unsafe_allow_html=True)
 
@@ -402,7 +401,7 @@ if uploaded_file:
 
 if st.button("⚙️ تشغيل محرك التنظيم والتنسيق المتقدم الكلي"):
     if uploaded_file:
-        with st.spinner('جاري المسح العميق وربط الكيانات لاستخراج كافة القيود بدقة...'):
+        with st.spinner('جاري المسح العميق وكسر حواجز مربعات النصوص لاستخراج كافة القيود...'):
             try:
                 df_res = extract_and_clean_data(uploaded_file)
                 if not df_res.empty:
@@ -420,7 +419,7 @@ if st.session_state.processing_done:
     df_final = st.session_state.df_final
     output_filename = st.session_state.output_filename
     
-    st.success(f"✅ فخر البرمجة! تم انتزاع واستعادة كافة البيانات الأصلية لـ ({len(df_final)}) قيد اسم بنجاح مطلق. 🚀")
+    st.success(f"✅ فخر البرمجة! تم انتزاع واستعادة كافة البيانات بما فيها مربعات النصوص لـ ({len(df_final)}) قيد اسم بنجاح مطلق. 🚀")
     
     with st.spinner('جاري صياغة وهيكلة مستند Word المطور...'):
         word_output = build_professional_word_report(df_final, output_filename)
