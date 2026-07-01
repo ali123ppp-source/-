@@ -1,4 +1,4 @@
-# import streamlit as st.txt  -- نسخة معدلة شاملة
+# import streamlit as st.txt  -- نسخة نهائية مدموجة مع الدالة المحسّنة
 import streamlit as st
 import pandas as pd
 from io import BytesIO, StringIO
@@ -95,12 +95,10 @@ def classify_failure_reason(line):
     """تعطي سبب محتمل لفشل استخراج السطر"""
     if not line or not line.strip():
         return "empty_line"
-    if '<td>' in line or '<table' in line:
-        return "html_table_unparsed"  # سيتم محاولة معالجة HTML-like لكن قد يفشل
-    # لا اسم عربي واضح
+    if '<td' in line.lower() or '<table' in line.lower():
+        return "html_table_unparsed"
     if not re.search(r'[\u0600-\u06FF]{2,}', line):
         return "no_arabic_name"
-    # لا أرقام كافية
     if len(re.findall(r'\b\d{1,}\b', line)) < 1:
         return "no_numbers"
     return "ambiguous_format"
@@ -119,7 +117,7 @@ def row_cells_unique(row):
         yield cell
 
 # -------------------------------------------------------------------------
-# دالة تحليل DOCX محسّنة (استبدال تام)
+# دالة تحليل DOCX محسّنة (النسخة النهائية المدموجة)
 # -------------------------------------------------------------------------
 def _parse_docx_to_list(file_obj, card_choice, stop_on_error=False, debug_limit=0):
     """
@@ -129,8 +127,6 @@ def _parse_docx_to_list(file_obj, card_choice, stop_on_error=False, debug_limit=
     - تجمع فقرات مبعثرة
     - ترجع parsed_records, failed_lines, raw_lines_count
     """
-    from docx import Document
-    import re
     doc = Document(file_obj)
     parsed_records = []
     failed_lines = []
@@ -150,7 +146,7 @@ def _parse_docx_to_list(file_obj, card_choice, stop_on_error=False, debug_limit=
         rows.append(' | '.join(tds))
         return rows
 
-    def classify_failure_reason(line):
+    def classify_failure_reason_local(line):
         if not line or not line.strip(): return "empty_line"
         if '<td' in line.lower() or '<table' in line.lower(): return "html_table_unparsed"
         if not re.search(r'[\u0600-\u06FF]{2,}', line): return "no_arabic_name"
@@ -161,7 +157,6 @@ def _parse_docx_to_list(file_obj, card_choice, stop_on_error=False, debug_limit=
     for table in doc.tables:
         prev_row_texts = []
         for row in table.rows:
-            # نقرأ كل خلية مع مراعاة الخلايا المدموجة أفقياً بتخطي نفس _tc
             cells = []
             seen = set()
             for cell in row.cells:
@@ -170,19 +165,21 @@ def _parse_docx_to_list(file_obj, card_choice, stop_on_error=False, debug_limit=
                     continue
                 seen.add(tc)
                 # فحص vMerge داخل خصائص الخلية
-                tcPr = tc.tcPr
                 vmerge = None
-                if tcPr is not None:
-                    vm = tcPr.find(qn('w:vMerge'))
-                    if vm is not None:
-                        vmerge = vm.get(qn('w:val')) if vm.get(qn('w:val')) is not None else "continue"
+                try:
+                    tcPr = tc.tcPr
+                    if tcPr is not None:
+                        vm = tcPr.find(qn('w:vMerge'))
+                        if vm is not None:
+                            vmerge = vm.get(qn('w:val')) if vm.get(qn('w:val')) is not None else "continue"
+                except Exception:
+                    vmerge = None
                 text = cell.text.replace('\n', ' ').strip()
                 cells.append((text, vmerge))
-            # الآن نحلّ مشكلة vMerge عمودي: إذا vMerge == 'continue' وخانة فارغة، نأخذ نص من prev_row_texts في نفس الموضع
+            # حل مشكلة vMerge عمودي
             resolved = []
             for i, (txt, vmerge) in enumerate(cells):
-                if vmerge and vmerge.lower() == 'continue':
-                    # حاول أخذ النص من prev_row_texts بنفس الفهرس إن وجد
+                if vmerge and str(vmerge).lower() == 'continue':
                     if i < len(prev_row_texts):
                         resolved.append(prev_row_texts[i])
                     else:
@@ -211,7 +208,6 @@ def _parse_docx_to_list(file_obj, card_choice, stop_on_error=False, debug_limit=
             else:
                 raw_lines.append(txt)
             continue
-        # تجميع فقرات قصيرة مع السطر السابق
         if len(txt.split()) < 4:
             buffer_para += " " + txt
         else:
@@ -229,18 +225,13 @@ def _parse_docx_to_list(file_obj, card_choice, stop_on_error=False, debug_limit=
     for idx, line in enumerate(raw_lines):
         try:
             line_clean = line.replace(',', ' ').replace('،', ' ').replace('-', ' ')
-            # تجاهل رؤوس واضحة فقط (نستخدم تطابق بداية السطر أو كلمة كاملة)
             if any(re.search(r'^\s*' + re.escape(w) + r'\b', line_clean, flags=re.IGNORECASE) for w in header_keywords):
-                # لكن إذا بدا كسجل (اسم عربي + أرقام) لا نتجاهله
                 if not (re.search(r'[\u0600-\u06FF]{2,}', line_clean) and re.search(r'\d', line_clean)):
                     continue
 
-            # أرقام بطاقات (نقبل أصفار بادئة)
             all_nums = re.findall(r'\b0*\d{4,}\b', line_clean)
-            # أرقام صغيرة للكلي/مستحق/محجوب
             smalls_all = re.findall(r'\b\d{1,3}\b', line_clean)
 
-            # استخراج اسم عربي قوي
             name_matches = re.findall(r'[\u0600-\u06FF]{2,}(?:\s+[\u0600-\u06FF]{2,})*', line_clean)
             name = None
             if name_matches:
@@ -254,17 +245,15 @@ def _parse_docx_to_list(file_obj, card_choice, stop_on_error=False, debug_limit=
                         break
 
             if not name:
-                reason = classify_failure_reason(line_clean)
+                reason = classify_failure_reason_local(line_clean)
                 failed_lines.append((line, reason))
                 continue
 
-            # رقم البطاقة: أطول رقم >=4 نعتبره حديث
             cards = [n for n in all_nums if len(n) >= 4]
             old_card = cards[0] if cards else "غير متوفر"
             new_card = cards[-1] if len(cards) >= 2 else old_card
             selected_card = new_card if card_choice == "رقم البطاقة الحديث" else old_card
 
-            # أعداد: نفضّل الأرقام بعد الاسم
             idx_name = line_clean.find(name.split()[0])
             before = line_clean[:idx_name] if idx_name >= 0 else ""
             after = line_clean[idx_name + len(name):] if idx_name >= 0 else line_clean
@@ -290,13 +279,11 @@ def _parse_docx_to_list(file_obj, card_choice, stop_on_error=False, debug_limit=
                     total, eligible = max(all_smalls), min(all_smalls)
                     withheld = 0
                 else:
-                    reason = classify_failure_reason(line_clean)
+                    reason = classify_failure_reason_local(line_clean)
                     failed_lines.append((line, reason))
                     continue
 
-            # تجاهل صفوف المجموعات التي تظهر كـ "اجمالي ..." إذا كانت ليست سجل فردي
             if re.search(r'^\s*(اجمالي|المجموع|مجموع)\b', name):
-                # إذا احتوى السطر على أرقام كبيرة جداً أو كان ملخصاً، لا نضيف كسجل
                 continue
 
             parsed_records.append({
@@ -315,7 +302,6 @@ def _parse_docx_to_list(file_obj, card_choice, stop_on_error=False, debug_limit=
             if stop_on_error:
                 raise
 
-    # إحصاء خطوط خام
     raw_count = len(raw_lines)
     return parsed_records, failed_lines, raw_count
 
@@ -360,20 +346,21 @@ def _parse_excel_to_list(file_obj, file_ext):
 # الماستر: الدمج والفرز والتنظيف (محدّث لاستقبال failed_lines)
 # -------------------------------------------------------------------------
 def extract_and_clean_data(file_obj, card_choice, file_obj2=None, file2_ext=None, stop_on_error=False):
-    # 1. استخراج الأساسي (الآن يعيد parsed و failed_lines)
-    parsed_primary, failed_primary = _parse_docx_to_list(file_obj, card_choice, stop_on_error=stop_on_error)
+    # 1. استخراج الأساسي (الآن يعيد parsed و failed_lines و raw_count)
+    parsed_primary, failed_primary, raw_count_primary = _parse_docx_to_list(file_obj, card_choice, stop_on_error=stop_on_error)
     
     # 2. استخراج ودمج الإضافي (إن وجد)
     parsed_secondary = []
     failed_secondary = []
+    raw_count_secondary = 0
     if file_obj2:
         if file2_ext == 'docx':
-            parsed_secondary, failed_secondary = _parse_docx_to_list(file_obj2, card_choice, stop_on_error=stop_on_error)
+            parsed_secondary, failed_secondary, raw_count_secondary = _parse_docx_to_list(file_obj2, card_choice, stop_on_error=stop_on_error)
         elif file2_ext in ['xlsx', 'csv']:
             parsed_secondary = _parse_excel_to_list(file_obj2, file2_ext)
-            # ملفات الإكسل لا تُرجع failed_lines هنا
+            failed_secondary = []
+            raw_count_secondary = len(parsed_secondary)
         else:
-            # غير مدعوم
             pass
 
     all_parsed = parsed_primary + parsed_secondary
@@ -395,7 +382,8 @@ def extract_and_clean_data(file_obj, card_choice, file_obj2=None, file2_ext=None
         df.insert(0, "ت", df.index + 1)
         
     stats = {
-        "total_raw_lines": len(all_parsed) + len(all_failed),
+        "raw_lines_primary": raw_count_primary,
+        "raw_lines_secondary": raw_count_secondary,
         "parsed_count": len(all_parsed),
         "failed_count": len(all_failed),
         "duplicates_count": len(df_duplicates),
@@ -628,6 +616,8 @@ if st.session_state.processing_done:
     # إظهار إحصاءات موجزة
     st.markdown("### إحصاءات الاستخراج")
     st.write({
+        "عدد الأسطر الخام (أساسي)": stats.get("raw_lines_primary", 0),
+        "عدد الأسطر الخام (ثانوي)": stats.get("raw_lines_secondary", 0),
         "عدد السجلات المستخرجة": stats.get("parsed_count", 0),
         "عدد الأسطر الفاشلة": stats.get("failed_count", 0),
         "عدد التكرارات المعزولة": stats.get("duplicates_count", 0),
