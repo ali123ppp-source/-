@@ -88,7 +88,7 @@ def format_cell_advanced(cell, text, bold=False, color_rgb=None, size_pt=16, fon
         run.font.size = Pt(size_pt)
 
 # -----------------------------------------------------------------------------
-# محرك قراءة وتنظيف البيانات الذكي والمدرع (المحدث نهائياً)
+# محرك قراءة وتنظيف البيانات
 # -----------------------------------------------------------------------------
 def extract_and_clean_data(file_obj, card_choice):
     doc = Document(file_obj)
@@ -97,64 +97,37 @@ def extract_and_clean_data(file_obj, card_choice):
     for table in doc.tables:
         for row in table.rows:
             cells = [cell.text.strip().replace('\n', ' ') for cell in row.cells]
-            row_text = "".join(cells)
-            
-            # تخطي الترويسات والعناوين بذكاء دون إسقاط أسماء المواطنين
-            # تم إزالة كلمة "المركز" و "الوكيل" و "الافراد" من شروط الحذف العشوائي
-            if not any(cells) or "الافراد المحجوبين" in row_text or "اسم رب الاسرة" in row_text or "اسم رب الأسرة" in row_text or "رقم الوكالة" in row_text or "اسم الوكيل" in row_text:
+            if not any(cells) or "المركز" in "".join(cells) or "الوكيل" in "".join(cells) or "اسم رب" in "".join(cells):
                 continue
             
-            # 1. إيجاد حقل الاسم بناءً على كثافة الحروف العربية
             name_idx = -1
             max_len = 0
             for i, c in enumerate(cells):
-                arabic_count = sum(1 for char in c if '\u0600' <= char <= '\u06FF')
-                if arabic_count > max_len:
-                    max_len = arabic_count
-                    name_idx = i
-                    
-            if name_idx == -1 or max_len < 2: 
-                continue
+                if any('\u0600' <= char <= '\u06FF' for char in c) and not any(char.isdigit() for char in c):
+                    if len(c) > max_len:
+                        max_len = len(c)
+                        name_idx = i
+            if name_idx == -1: continue
             
-            # 2. استخراج الأرقام الإحصائية التي تسبق الاسم بمرونة تامة
-            nums_before = cells[:name_idx]
-            valid_nums = [c for c in nums_before if ''.join(filter(str.isdigit, c))]
+            card_indices = [i for i, c in enumerate(cells) if c.isdigit() and len(c) >= 5]
+            if not card_indices: continue
             
-            def parse_int(val):
-                nums = ''.join(filter(str.isdigit, val))
-                return int(nums) if nums else 0
-
-            total, eligible, withheld = 0, 0, 0
-            if len(valid_nums) >= 1:
-                total = parse_int(valid_nums[-1])
-            if len(valid_nums) >= 2:
-                eligible = parse_int(valid_nums[-2])
-            if len(valid_nums) >= 3:
-                withheld = parse_int(valid_nums[-3])
-                
-            # 3. إيجاد أرقام البطاقات بأمان تام
-            card_nums = []
-            for i in range(name_idx + 1, len(cells)):
-                c_clean = cells[i].replace(' ', '').replace('-', '')
-                digits_only = ''.join(filter(str.isdigit, c_clean))
-                if len(digits_only) >= 2:
-                    card_nums.append(c_clean)
+            old_card_num = cells[card_indices[0]]
+            new_card_num = cells[card_indices[1]] if len(card_indices) > 1 else old_card_num
+            selected_card_num = new_card_num if card_choice == "رقم البطاقة الحديث" else old_card_num
             
-            if total == 0 and eligible == 0 and withheld == 0 and not card_nums:
-                continue
-                
-            if not card_nums:
-                selected_card_num = "غير متوفر"
+            digit_cells = [int(cells[i]) for i in range(name_idx) if cells[i].isdigit()]
+            if len(digit_cells) >= 3:
+                withheld, eligible, total = digit_cells[0], digit_cells[1], digit_cells[2]
+            elif len(digit_cells) == 2:
+                withheld, eligible, total = 0, digit_cells[0], digit_cells[1]
             else:
-                old_card_num = card_nums[0]
-                new_card_num = card_nums[1] if len(card_nums) > 1 else old_card_num
-                selected_card_num = new_card_num if card_choice == "رقم البطاقة الحديث" else old_card_num
+                continue
             
-            # 4. تنظيف الاسم من أي أرقام مطبعية خطأ وقص اللقب
+            # قص اللقب والإبقاء على الاسم الثلاثي فقط بصرامة
             full_name = cells[name_idx]
-            full_name = ''.join(char for char in full_name if not char.isdigit()).strip()
             name_parts = full_name.split()
-            three_part_name = " ".join(name_parts[:3]) if name_parts else full_name
+            three_part_name = " ".join(name_parts[:3])
                 
             raw_records.append({
                 "اسم رب الأسرة": three_part_name,
@@ -293,7 +266,7 @@ def build_professional_word_report_v2(df, filename_base, card_choice):
     return save_doc_buffer(doc, df)
 
 # -----------------------------------------------------------------------------
-# محرك بناء تقرير Word - النموذج الثالث
+# محرك بناء تقرير Word - النموذج الثالث (عناوين 12، تفاصيل 16، 4 أشهر)
 # -----------------------------------------------------------------------------
 def build_professional_word_report_v3(df, filename_base, card_choice):
     doc = Document()
@@ -349,7 +322,7 @@ def build_professional_word_report_v3(df, filename_base, card_choice):
     return save_doc_buffer(doc, df)
 
 # -----------------------------------------------------------------------------
-# محرك بناء تقرير Word - النموذج الرابع
+# محرك بناء تقرير Word - النموذج الرابع (12 سلة، التعديل: العدد الكلي للأفراد)
 # -----------------------------------------------------------------------------
 def build_professional_word_report_v4(df, filename_base, card_choice):
     doc = Document()
@@ -375,6 +348,7 @@ def build_professional_word_report_v4(df, filename_base, card_choice):
     title_run.font.size = Pt(14)
     title_run.bold = True
     
+    # تم تغيير عنوان العمود الرابع إلى "العدد الكلي" بدلاً من المستحق
     headers = ["ت", card_choice, "اسم المواطن", "العدد الكلي"] + [f"سلة {i}" for i in range(1, 13)]
     
     table = doc.add_table(rows=1, cols=16)
@@ -392,12 +366,13 @@ def build_professional_word_report_v4(df, filename_base, card_choice):
     max_name_len = max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15)
     dynamic_name_width = Cm(max_name_len * 0.22 + 0.5)
     
+    # توزيع المقاسات للنموذج الرابع (12 سلة تملأ الورقة بأحجام متساوية)
     col_widths = [
         Cm(0.9),              # ت
         Cm(2.5),              # رقم البطاقة
         dynamic_name_width,   # اسم المواطن
         Cm(0.9)               # العدد الكلي
-    ] + [Cm(1.05)] * 12       # 12 سلة
+    ] + [Cm(1.05)] * 12       # 12 سلة بأحجام متساوية 
     
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
     
@@ -405,6 +380,7 @@ def build_professional_word_report_v4(df, filename_base, card_choice):
     for i, title in enumerate(headers):
         hdr_cells[i].width = col_widths[i]
         
+        # جعل النصوص عمودية للأعمدة الضيقة من العدد الكلي إلى آخر سلة لتوفير مساحة
         if i >= 3:
             set_cell_vertical_text(hdr_cells[i])
         
@@ -429,18 +405,19 @@ def build_professional_word_report_v4(df, filename_base, card_choice):
             
             val = ""
             cell_align = "center"
-            font_size = 14  
+            font_size = 14  # حجم خط 14 ليتناسب مع 16 عمود
             
             if i == 0: val = row["ت"]
             elif i == 1: val = row["رقم البطاقة"]
             elif i == 2: 
                 val = row["اسم رب الأسرة"]
                 cell_align = "left" 
-            elif i == 3: val = row["الكلي"] 
-            elif i >= 4: val = "" 
+            elif i == 3: val = row["الكلي"] # تم التعديل لعرض الكلي بدلاً من مستحق
+            elif i >= 4: val = "" # حقول السلات الـ 12 تبقى فارغة
                     
             format_cell_advanced(row_cells[i], val, size_pt=font_size, font_name="Calibri", color_rgb=None, align=cell_align)
             
+            # التنسيق اللوني
             if is_eligible_zero:
                 set_cell_background(row_cells[i], HEX_ALERT_RED)
             else:
@@ -449,7 +426,7 @@ def build_professional_word_report_v4(df, filename_base, card_choice):
 
     return save_doc_buffer(doc, df)
 
-# دالة لحفظ وعرض الإحصائيات المشتركة
+# دالة لحفظ وعرض الإحصائيات المشتركة تحت الجدول
 def save_doc_buffer(doc, df):
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
     total_all = df["الكلي"].astype(int).sum()
@@ -472,6 +449,7 @@ def save_doc_buffer(doc, df):
     stats_text_run.bold = True
     stats_text_run.font.color.rgb = COLOR_NAVY_BLUE
 
+    # الترقيم السفلي للصفحات
     footer = doc.sections[0].footer
     if len(footer.paragraphs) == 0:
         footer_p = footer.add_paragraph()
@@ -535,7 +513,7 @@ if uploaded_file:
 
 if st.button("⚙️ تشغيل محرك التنظيم والتنسيق المتقدم الكلي"):
     if uploaded_file:
-        with st.spinner('جاري قراءة وتحليل كافة القيود بلا استثناء...'):
+        with st.spinner('جاري ترتيب القيود أبجدياً وإعداد التنسيق الشرطي والمقاييس...'):
             try:
                 df_res = extract_and_clean_data(uploaded_file, selected_card)
                 if not df_res.empty:
@@ -557,7 +535,7 @@ if st.session_state.processing_done:
     used_card_type = st.session_state.selected_card
     used_template = st.session_state.template_choice
     
-    st.success(f"✅ تم التنظيم الأبجدي بنجاح لـ ({len(df_final)}) قيد اسم (لا يوجد أي قيد مفقود).")
+    st.success(f"✅ تم التنظيم الأبجدي بنجاح لـ ({len(df_final)}) قيد اسم (تم قصرها على الاسم الثلاثي).")
     
     with st.spinner('جاري صياغة وهيكلة مستند Word المطور المختار...'):
         if used_template == "النموذج الأول (الأصلي المطور)":
