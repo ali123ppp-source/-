@@ -28,6 +28,7 @@ if "processing_done" not in st.session_state:
     st.session_state.output_filename = ""
     st.session_state.selected_card = ""
     st.session_state.template_choice = ""
+    st.session_state.name_choice = ""
 
 # -----------------------------------------------------------------------------
 # مساعدات التنسيق المتقدمة لملفات Word عبر الـ XML
@@ -90,7 +91,7 @@ def format_cell_advanced(cell, text, bold=False, color_rgb=None, size_pt=16, fon
 # -----------------------------------------------------------------------------
 # محرك قراءة وتنظيف البيانات المطور (يدعم Word و Excel)
 # -----------------------------------------------------------------------------
-def extract_and_clean_data(file_obj, card_choice):
+def extract_and_clean_data(file_obj, card_choice, name_length_choice):
     raw_records = []
     rows_data = []
     
@@ -148,10 +149,15 @@ def extract_and_clean_data(file_obj, card_choice):
         
         full_name = cells[name_idx]
         name_parts = full_name.split()
-        three_part_name = " ".join(name_parts[:3])
+        
+        # التحكم في طول الاسم بناءً على اختيار المستخدم
+        if name_length_choice == "الاسم الرباعي (إن وجد)":
+            final_name = " ".join(name_parts[:4])
+        else:
+            final_name = " ".join(name_parts[:3])
             
         raw_records.append({
-            "اسم رب الأسرة": three_part_name,
+            "اسم رب الأسرة": final_name,
             "رقم البطاقة": selected_card_num,
             "الكلي": total,
             "محجوب": withheld,
@@ -165,7 +171,7 @@ def extract_and_clean_data(file_obj, card_choice):
     return df
 
 # -----------------------------------------------------------------------------
-# دوال إنشاء النماذج (1 إلى 4)
+# دوال إنشاء النماذج (1 إلى 5)
 # -----------------------------------------------------------------------------
 def build_professional_word_report(df, filename_base, card_choice):
     doc = Document()
@@ -343,50 +349,32 @@ def build_professional_word_report_v4(df, filename_base, card_choice):
                 if i == 3: set_cell_background(row_cells[i], "E8F8F5")
     return save_doc_buffer(doc, df)
 
-# -----------------------------------------------------------------------------
-# محرك بناء تقرير Word - النموذج الخامس (الجديد: ورقة A3، حقول كبيرة، Microsoft Uighur)
-# -----------------------------------------------------------------------------
 def build_professional_word_report_v5(df, filename_base, card_choice):
     doc = Document()
-    
-    # إعداد ورقة بحجم A3 (الوضع العمودي: العرض 29.7 سم، الطول 42.0 سم)
     for section in doc.sections:
-        section.page_width = Cm(29.7)
-        section.page_height = Cm(42.0)
-        section.top_margin = Cm(0.5)
-        section.bottom_margin = Cm(0.5)
-        section.left_margin = Cm(0.5)
-        section.right_margin = Cm(0.5)
+        section.page_width, section.page_height = Cm(29.7), Cm(42.0)
+        section.top_margin, section.bottom_margin, section.left_margin, section.right_margin = Cm(0.5), Cm(0.5), Cm(0.5), Cm(0.5)
         
     clean_name = filename_base
-    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز"]:
-        clean_name = clean_name.replace(w, "")
-    clean_name = re.sub(r'[a-zA-Z]', '', clean_name)
-    clean_name = re.sub(r'[\-_+_.]', '', clean_name)
-    clean_name = " ".join(clean_name.split())
+    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز"]: clean_name = clean_name.replace(w, "")
+    clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', '', clean_name).split())
     
     title_p = doc.add_paragraph()
     title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     title_run = title_p.add_run(f"الكشف الإحصائي المنسق للوكيل: {clean_name}")
-    title_run.font.name = "Segoe UI Semibold"
-    title_run.font.size = Pt(18)
-    title_run.bold = True
+    title_run.font.name, title_run.font.size, title_run.bold = "Segoe UI Semibold", Pt(18), True
     
     headers = ["ت", "اسم رب الأسرة", "عدد الأفراد المستحقة", "حقل كبير فارغ", "حقل كبير فارغ"]
     table = doc.add_table(rows=1, cols=5)
-    table.style = 'Table Grid'
-    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    table.style, table.alignment = 'Table Grid', WD_TABLE_ALIGNMENT.CENTER
     set_table_borders(table, color_hex="2A4B7C")
-    
     table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
     table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
     
-    # توزيع المقاسات لتتناسب بشكل مثالي مع عرض ورقة A3 (المتاح 28.7 سم تقريباً)
     col_widths = [Cm(1.5), Cm(8.0), Cm(3.2), Cm(8.0), Cm(8.0)]
-    
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
-    COLOR_NAME_BLUE = RGBColor(0, 112, 192) # أزرق احترافي للأسماء
-    COLOR_RED = RGBColor(255, 0, 0) # أحمر للحالات الصفرية
+    COLOR_NAME_BLUE = RGBColor(0, 112, 192)
+    COLOR_RED = RGBColor(255, 0, 0)
     
     for i, title in enumerate(headers):
         table.rows[0].cells[i].width = col_widths[i]
@@ -395,29 +383,22 @@ def build_professional_word_report_v5(df, filename_base, card_choice):
     for idx, row in df.iterrows():
         row_cells = table.add_row().cells
         table.rows[idx+1]._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
-        
         is_eligible_zero = int(row["مستحق"]) == 0
         set_cell_no_wrap(row_cells[1])
         
         for i in range(5):
             row_cells[i].width = col_widths[i]
-            
             val = ""
             cell_align = "center"
             text_color = None
             
-            if i == 0:
-                val = row["ت"]
+            if i == 0: val = row["ت"]
             elif i == 1:
                 val = row["اسم رب الأسرة"]
                 cell_align = "left"
-                # لون أزرق للأسماء الطبيعية، وأحمر إذا كان المستحق صفر
                 text_color = COLOR_RED if is_eligible_zero else COLOR_NAME_BLUE
-            elif i == 2:
-                val = "x" if is_eligible_zero else row["مستحق"]
-            elif i in [3, 4]:
-                # تعبئة الحقول الفارغة بـ XXXXXXXXXXXX إذا كان المستحق صفر
-                val = "XXXXXXXXXXXX" if is_eligible_zero else ""
+            elif i == 2: val = "x" if is_eligible_zero else row["مستحق"]
+            elif i in [3, 4]: val = "XXXXXXXXXXXX" if is_eligible_zero else ""
                 
             format_cell_advanced(row_cells[i], val, size_pt=16, font_name="Microsoft Uighur", color_rgb=text_color, align=cell_align)
             
@@ -472,11 +453,12 @@ def save_doc_buffer(doc, df):
 # واجهة استخدام التطبيق (Streamlit Interface)
 # -----------------------------------------------------------------------------
 st.markdown("<h3 style='text-align: right;'>📂 رفع الكشف المراد تدقيقه وتنسيقه للمطبعة</h3>", unsafe_allow_html=True)
-uploaded_file = st.file_uploader("ارفع كشف الوكلاء", type=['docx', 'xlsx'], key="doc_input_v7", label_visibility="collapsed")
+uploaded_file = st.file_uploader("ارفع كشف الوكلاء", type=['docx', 'xlsx'], key="doc_input_v8", label_visibility="collapsed")
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-col1, col2 = st.columns([1, 2])
+# تقسيم الخيارات إلى 3 أعمدة
+col1, col2, col3 = st.columns([1, 1, 2])
 
 with col1:
     selected_card = st.radio(
@@ -487,6 +469,14 @@ with col1:
     )
 
 with col2:
+    name_length_choice = st.radio(
+        "👤 طول اسم رب الأسرة:",
+        ["الاسم الثلاثي فقط", "الاسم الرباعي (إن وجد)"],
+        index=0,
+        horizontal=False
+    )
+
+with col3:
     template_choice = st.radio(
         "🎨 اختر نموذج قالب الـ Word المطلوب:",
         [
@@ -506,19 +496,21 @@ if uploaded_file:
     current_filename = uploaded_file.name.rsplit('.', 1)[0]
     if (st.session_state.output_filename != current_filename or 
         st.session_state.selected_card != selected_card or 
-        st.session_state.template_choice != template_choice):
+        st.session_state.template_choice != template_choice or
+        st.session_state.name_choice != name_length_choice):
         st.session_state.processing_done = False
 
 if st.button("⚙️ تشغيل محرك التنظيم والتنسيق المتقدم الكلي"):
     if uploaded_file:
         with st.spinner('جاري ترتيب القيود أبجدياً وإعداد التنسيق الشرطي والمقاييس...'):
             try:
-                df_res = extract_and_clean_data(uploaded_file, selected_card)
+                df_res = extract_and_clean_data(uploaded_file, selected_card, name_length_choice)
                 if not df_res.empty:
                     st.session_state.df_final = df_res
                     st.session_state.output_filename = uploaded_file.name.rsplit('.', 1)[0]
                     st.session_state.selected_card = selected_card
                     st.session_state.template_choice = template_choice
+                    st.session_state.name_choice = name_length_choice
                     st.session_state.processing_done = True
                 else:
                     st.error("لم يتم العثور على بيانات جداول متوافقة.")
@@ -533,7 +525,7 @@ if st.session_state.processing_done:
     used_card_type = st.session_state.selected_card
     used_template = st.session_state.template_choice
     
-    st.success(f"✅ تم التنظيم الأبجدي بنجاح لـ ({len(df_final)}) قيد اسم (تم قصرها على الاسم الثلاثي).")
+    st.success(f"✅ تم التنظيم الأبجدي بنجاح لـ ({len(df_final)}) قيد اسم.")
     
     with st.spinner('جاري صياغة وهيكلة مستند Word المطور المختار...'):
         if used_template == "النموذج الأول (الأصلي المطور)":
