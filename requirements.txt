@@ -3,4 +3,4 @@ pandas
 python-docx
 openpyxl
 xlsxwriter
-weasyprint
+pdfkit
