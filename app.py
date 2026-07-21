@@ -9,6 +9,13 @@ from docx.oxml import parse_xml, OxmlElement
 from docx.oxml.ns import nsdecls, qn
 import re
 
+# مكتبة تحويل HTML إلى PDF
+try:
+    from weasyprint import HTML
+    WEASYPRINT_AVAILABLE = True
+except ImportError:
+    WEASYPRINT_AVAILABLE = False
+
 # إعدادات واجهة المستخدم
 st.set_page_config(page_title="نظام تنسيق وتدقيق كشوفات الوكلاء", layout="wide")
 st.markdown("""
@@ -137,8 +144,17 @@ def extract_and_clean_data(file_obj, card_choice, name_length_choice):
         
         old_card_num = cells[card_indices[0]]
         new_card_num = cells[card_indices[1]] if len(card_indices) > 1 else old_card_num
-        selected_card_num = new_card_num if card_choice == "رقم البطاقة الحديث" else old_card_num
         
+        if card_choice == "رقم البطاقة الحديث":
+            selected_card_num = new_card_num
+        elif card_choice == "القديم والحديث":
+            if old_card_num != new_card_num:
+                selected_card_num = f"{old_card_num} / {new_card_num}"
+            else:
+                selected_card_num = old_card_num
+        else:
+            selected_card_num = old_card_num
+
         digit_cells = [int(cells[i]) for i in range(name_idx) if cells[i].isdigit()]
         if len(digit_cells) >= 3:
             withheld, eligible, total = digit_cells[0], digit_cells[1], digit_cells[2]
@@ -150,7 +166,6 @@ def extract_and_clean_data(file_obj, card_choice, name_length_choice):
         full_name = cells[name_idx]
         name_parts = full_name.split()
         
-        # التحكم في طول الاسم بناءً على اختيار المستخدم
         if name_length_choice == "الاسم الرباعي (إن وجد)":
             final_name = " ".join(name_parts[:4])
         else:
@@ -171,14 +186,14 @@ def extract_and_clean_data(file_obj, card_choice, name_length_choice):
     return df
 
 # -----------------------------------------------------------------------------
-# دوال إنشاء النماذج (1 إلى 5)
+# دوال إنشاء النماذج (1 إلى 5) بصيغة Word
 # -----------------------------------------------------------------------------
 def build_professional_word_report(df, filename_base, card_choice):
     doc = Document()
     for section in doc.sections:
         section.top_margin, section.bottom_margin, section.left_margin, section.right_margin = Cm(0.5), Cm(0.5), Cm(0.3), Cm(0.3)
     clean_name = filename_base
-    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز"]: clean_name = clean_name.replace(w, "")
+    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج"]: clean_name = clean_name.replace(w, "")
     clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', '', clean_name).split())
     
     title_p = doc.add_paragraph()
@@ -231,7 +246,7 @@ def build_professional_word_report_v2(df, filename_base, card_choice):
     for section in doc.sections:
         section.top_margin, section.bottom_margin, section.left_margin, section.right_margin = Cm(0.5), Cm(0.5), Cm(0.3), Cm(0.3)
     clean_name = filename_base
-    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز"]: clean_name = clean_name.replace(w, "")
+    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج"]: clean_name = clean_name.replace(w, "")
     clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', '', clean_name).split())
     title_p = doc.add_paragraph()
     title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
@@ -273,7 +288,7 @@ def build_professional_word_report_v3(df, filename_base, card_choice):
     for section in doc.sections:
         section.top_margin, section.bottom_margin, section.left_margin, section.right_margin = Cm(0.5), Cm(0.5), Cm(0.3), Cm(0.3)
     clean_name = filename_base
-    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز"]: clean_name = clean_name.replace(w, "")
+    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج"]: clean_name = clean_name.replace(w, "")
     clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', '', clean_name).split())
     title_p = doc.add_paragraph()
     title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
@@ -313,7 +328,7 @@ def build_professional_word_report_v4(df, filename_base, card_choice):
     for section in doc.sections:
         section.top_margin, section.bottom_margin, section.left_margin, section.right_margin = Cm(0.5), Cm(0.5), Cm(0.3), Cm(0.3)
     clean_name = filename_base
-    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز"]: clean_name = clean_name.replace(w, "")
+    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج"]: clean_name = clean_name.replace(w, "")
     clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', '', clean_name).split())
     title_p = doc.add_paragraph()
     title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
@@ -356,7 +371,7 @@ def build_professional_word_report_v5(df, filename_base, card_choice):
         section.top_margin, section.bottom_margin, section.left_margin, section.right_margin = Cm(0.5), Cm(0.5), Cm(0.5), Cm(0.5)
         
     clean_name = filename_base
-    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز"]: clean_name = clean_name.replace(w, "")
+    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج"]: clean_name = clean_name.replace(w, "")
     clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', '', clean_name).split())
     
     title_p = doc.add_paragraph()
@@ -404,7 +419,6 @@ def build_professional_word_report_v5(df, filename_base, card_choice):
             
     return save_doc_buffer(doc, df)
 
-# دالة لحفظ وعرض الإحصائيات المشتركة تحت الجدول
 def save_doc_buffer(doc, df):
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
     total_all = df["الكلي"].astype(int).sum()
@@ -427,7 +441,6 @@ def save_doc_buffer(doc, df):
     stats_text_run.bold = True
     stats_text_run.font.color.rgb = COLOR_NAVY_BLUE
 
-    # الترقيم السفلي للصفحات
     footer = doc.sections[0].footer
     if len(footer.paragraphs) == 0:
         footer_p = footer.add_paragraph()
@@ -450,20 +463,194 @@ def save_doc_buffer(doc, df):
     return buffer
 
 # -----------------------------------------------------------------------------
+# المحرك الجديد: إنشاء تقارير PDF متطابقة بنفس التنسيق
+# -----------------------------------------------------------------------------
+def build_pdf_report(df, filename_base, card_choice, template_choice):
+    clean_name = filename_base
+    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج"]: clean_name = clean_name.replace(w, "")
+    clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', '', clean_name).split())
+
+    total_all = df["الكلي"].astype(int).sum()
+    total_eligible = df["مستحق"].astype(int).sum()
+    total_withheld = df["محجوب"].astype(int).sum()
+
+    page_orientation = "portrait"
+    page_size = "A4"
+    
+    if template_choice == "النموذج الأول (الأصلي المطور)":
+        headers = ["ت", "اسم رب الأسرة", "حقل فارغ", "الكلي", "مستحق", "محجوب", card_choice, "ملاحظات"]
+    elif template_choice == "النموذج الثاني (حجم 14 وحقلين فارغين)":
+        headers = ["ت", "اسم رب الأسرة", "حقل فارغ 1", "حقل فارغ 2", "الكلي", "مستحق", "محجوب", card_choice, "ملاحظات"]
+    elif template_choice == "النموذج الثالث (خط 16، عناوين 12، 4 أشهر)":
+        headers = ["ت", "اسم رب الأسرة", card_choice, "الكلي", "مستحق", "محجوب", "الشهر الأول", "الشهر الثاني", "الشهر الثالث", "الشهر الرابع"]
+    elif template_choice == "النموذج الرابع (12 سلة، العدد الكلي)":
+        headers = ["ت", card_choice, "اسم المواطن", "العدد الكلي"] + [f"سلة {i}" for i in range(1, 13)]
+        page_orientation = "landscape"
+    else:
+        headers = ["ت", "اسم رب الأسرة", "عدد الأفراد المستحقة", "حقل كبير فارغ", "حقل كبير فارغ"]
+        page_size = "A3"
+        page_orientation = "landscape"
+
+    rows_html = ""
+    for idx, row in df.iterrows():
+        is_eligible_zero = int(row["مستحق"]) == 0
+        row_bg = "background-color: #EC7063;" if is_eligible_zero else ""
+        
+        cells_html = ""
+        
+        if template_choice == "النموذج الأول (الأصلي المطور)":
+            vals = [
+                (row["ت"], "background-color: #D4E6F1;" if not is_eligible_zero else ""),
+                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                ("x" if is_eligible_zero else "", ""),
+                (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
+                (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
+                (row["محجوب"], "background-color: #FADBD8;" if not is_eligible_zero else ""),
+                (row["رقم البطاقة"], ""),
+                ("محجوب" if is_eligible_zero else "", "color: #CB4335; font-weight: bold;" if is_eligible_zero else "")
+            ]
+        elif template_choice == "النموذج الثاني (حجم 14 وحقلين فارغين)":
+            vals = [
+                (row["ت"], "background-color: #D4E6F1;" if not is_eligible_zero else ""),
+                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                ("x" if is_eligible_zero else "", ""),
+                ("x" if is_eligible_zero else "", ""),
+                (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
+                (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
+                (row["محجوب"], "background-color: #E5E7E9;" if not is_eligible_zero else ""),
+                (row["رقم البطاقة"], ""),
+                ("محجوب" if is_eligible_zero else "", "color: #CB4335; font-weight: bold;" if is_eligible_zero else "")
+            ]
+        elif template_choice == "النموذج الثالث (خط 16، عناوين 12، 4 أشهر)":
+            vals = [
+                (row["ت"], "background-color: #D4E6F1;" if not is_eligible_zero else ""),
+                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                (row["رقم البطاقة"], ""),
+                (row["الكلي"], "background-color: #E5E7E9;" if not is_eligible_zero else ""),
+                (row["مستحق"], ""),
+                (row["محجوب"], "background-color: #FCF3CF;" if not is_eligible_zero else ""),
+                ("", ""), ("", ""), ("", ""), ("", "")
+            ]
+        elif template_choice == "النموذج الرابع (12 سلة، العدد الكلي)":
+            vals = [
+                (row["ت"], "background-color: #D4E6F1;" if not is_eligible_zero else ""),
+                (row["رقم البطاقة"], ""),
+                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                (row["الكلي"], "background-color: #E8F8F5;" if not is_eligible_zero else "")
+            ] + [("", "")] * 12
+        else:
+            vals = [
+                (row["ت"], ""),
+                (row["اسم رب الأسرة"], f"text-align: right; font-weight: bold; color: {'#FF0000' if is_eligible_zero else '#0070C0'};"),
+                ("x" if is_eligible_zero else row["مستحق"], ""),
+                ("XXXXXXXXXXXX" if is_eligible_zero else "", ""),
+                ("XXXXXXXXXXXX" if is_eligible_zero else "", "")
+            ]
+
+        for val, style in vals:
+            cell_style = f"{row_bg} {style}"
+            cells_html += f'<td style="{cell_style}">{val}</td>'
+            
+        rows_html += f'<tr>{cells_html}</tr>'
+
+    headers_html = "".join([f'<th>{h}</th>' for h in headers])
+
+    html_doc = f"""
+    <!DOCTYPE html>
+    <html dir="rtl" lang="ar">
+    <head>
+        <meta charset="utf-8">
+        <style>
+            @page {{
+                size: {page_size} {page_orientation};
+                margin: 8mm 6mm;
+                @bottom-center {{
+                    content: "صفحة " counter(page);
+                    font-size: 10pt;
+                    font-family: Arial, sans-serif;
+                }}
+            }}
+            body {{
+                font-family: 'Segoe UI', 'Arial', sans-serif;
+                direction: rtl;
+                margin: 0;
+                padding: 0;
+            }}
+            .title {{
+                text-align: right;
+                font-size: 14pt;
+                font-weight: bold;
+                color: #2A4B7C;
+                margin-bottom: 8px;
+            }}
+            table {{
+                width: 100%;
+                border-collapse: collapse;
+                font-size: 11pt;
+            }}
+            th {{
+                background-color: #F2F4F8;
+                color: #2A4B7C;
+                border: 1px solid #2A4B7C;
+                padding: 6px 4px;
+                text-align: center;
+                font-weight: bold;
+            }}
+            td {{
+                border: 1px solid #2A4B7C;
+                padding: 4px 3px;
+                text-align: center;
+                vertical-align: middle;
+                white-space: nowrap;
+            }}
+            .stats {{
+                margin-top: 12px;
+                text-align: right;
+                font-weight: bold;
+                font-size: 12pt;
+                color: #2A4B7C;
+                line-height: 1.5;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="title">الكشف الإحصائي المنسق للوكيل: {clean_name}</div>
+        <table>
+            <thead>
+                <tr>{headers_html}</tr>
+            </thead>
+            <tbody>
+                {rows_html}
+            </tbody>
+        </table>
+        <div class="stats">
+            العدد الكلي للافراد = {total_all}<br>
+            العدد الكلي للمستحقين = {total_eligible}<br>
+            العدد الكلي للمحجوبين = {total_withheld}
+        </div>
+    </body>
+    </html>
+    """
+    
+    pdf_buffer = BytesIO()
+    HTML(string=html_doc).write_pdf(pdf_buffer)
+    pdf_buffer.seek(0)
+    return pdf_buffer
+
+# -----------------------------------------------------------------------------
 # واجهة استخدام التطبيق (Streamlit Interface)
 # -----------------------------------------------------------------------------
 st.markdown("<h3 style='text-align: right;'>📂 رفع الكشف المراد تدقيقه وتنسيقه للمطبعة</h3>", unsafe_allow_html=True)
-uploaded_file = st.file_uploader("ارفع كشف الوكلاء", type=['docx', 'xlsx'], key="doc_input_v8", label_visibility="collapsed")
+uploaded_files = st.file_uploader("ارفع كشف الوكلاء (يمكنك رفع ملف أو أكثر لدمجهم سوياً)", type=['docx', 'xlsx'], accept_multiple_files=True, key="doc_input_v8", label_visibility="collapsed")
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# تقسيم الخيارات إلى 3 أعمدة
 col1, col2, col3 = st.columns([1, 1, 2])
 
 with col1:
     selected_card = st.radio(
         "📄 اختر نوع رقم البطاقة:",
-        ["رقم البطاقة القديم", "رقم البطاقة الحديث"],
+        ["رقم البطاقة القديم", "رقم البطاقة الحديث", "القديم والحديث"],
         index=0,
         horizontal=False
     )
@@ -492,8 +679,8 @@ with col3:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-if uploaded_file:
-    current_filename = uploaded_file.name.rsplit('.', 1)[0]
+if uploaded_files:
+    current_filename = " و ".join([f.name.rsplit('.', 1)[0] for f in uploaded_files])
     if (st.session_state.output_filename != current_filename or 
         st.session_state.selected_card != selected_card or 
         st.session_state.template_choice != template_choice or
@@ -501,19 +688,32 @@ if uploaded_file:
         st.session_state.processing_done = False
 
 if st.button("⚙️ تشغيل محرك التنظيم والتنسيق المتقدم الكلي"):
-    if uploaded_file:
-        with st.spinner('جاري ترتيب القيود أبجدياً وإعداد التنسيق الشرطي والمقاييس...'):
+    if uploaded_files:
+        with st.spinner('جاري معالجة وترتيب القيود أبجدياً وإعداد التنسيق الشرطي والمقاييس...'):
             try:
-                df_res = extract_and_clean_data(uploaded_file, selected_card, name_length_choice)
-                if not df_res.empty:
-                    st.session_state.df_final = df_res
-                    st.session_state.output_filename = uploaded_file.name.rsplit('.', 1)[0]
+                all_extracted_dfs = []
+                for f in uploaded_files:
+                    df_res = extract_and_clean_data(f, selected_card, name_length_choice)
+                    if not df_res.empty:
+                        all_extracted_dfs.append(df_res)
+                
+                if all_extracted_dfs:
+                    merged_df = pd.concat(all_extracted_dfs, ignore_index=True)
+                    merged_df = merged_df.sort_values(by="اسم رب الأسرة").reset_index(drop=True)
+                    merged_df["ت"] = merged_df.index + 1
+                    
+                    st.session_state.df_final = merged_df
+                    if len(uploaded_files) > 1:
+                        st.session_state.output_filename = "مدمج_" + "_".join([f.name.rsplit('.', 1)[0][:10] for f in uploaded_files])
+                    else:
+                        st.session_state.output_filename = uploaded_files[0].name.rsplit('.', 1)[0]
+                        
                     st.session_state.selected_card = selected_card
                     st.session_state.template_choice = template_choice
                     st.session_state.name_choice = name_length_choice
                     st.session_state.processing_done = True
                 else:
-                    st.error("لم يتم العثور على بيانات جداول متوافقة.")
+                    st.error("لم يتم العثور على بيانات جداول متوافقة في الملفات المرفوعة.")
             except Exception as e:
                 st.error(f"خطأ غير متوقع: {e}")
     else:
@@ -525,9 +725,9 @@ if st.session_state.processing_done:
     used_card_type = st.session_state.selected_card
     used_template = st.session_state.template_choice
     
-    st.success(f"✅ تم التنظيم الأبجدي بنجاح لـ ({len(df_final)}) قيد اسم.")
+    st.success(f"✅ تم الدمج والتنظيم الأبجدي بنجاح لـ ({len(df_final)}) قيد اسم.")
     
-    with st.spinner('جاري صياغة وهيكلة مستند Word المطور المختار...'):
+    with st.spinner('جاري صياغة وهيكلة مستندات Word و PDF المكتملة...'):
         if used_template == "النموذج الأول (الأصلي المطور)":
             word_output = build_professional_word_report(df_final, output_filename, used_card_type)
         elif used_template == "النموذج الثاني (حجم 14 وحقلين فارغين)":
@@ -538,10 +738,30 @@ if st.session_state.processing_done:
             word_output = build_professional_word_report_v4(df_final, output_filename, used_card_type)
         else:
             word_output = build_professional_word_report_v5(df_final, output_filename, used_card_type)
+
+    # عرض خيارات التحميل جنباً إلى جنب (Word و PDF)
+    st.markdown("### 📥 خيارات التحميل الفوري:")
+    dl_col1, dl_col2 = st.columns(2)
+    
+    with dl_col1:
+        st.download_button(
+            label="📄 تحميل الكشف المنسق (Word)",
+            data=word_output,
+            file_name=f"كشف_منسق_جاهز_{output_filename}.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
         
-    st.download_button(
-        label="📥 تحميل كشف الوكلاء المنسق والجاهز للطباعة فوراً (Word)",
-        data=word_output,
-        file_name=f"كشف_منسق_جاهز_{output_filename}.docx",
-        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    )
+    with dl_col2:
+        if WEASYPRINT_AVAILABLE:
+            try:
+                pdf_output = build_pdf_report(df_final, output_filename, used_card_type, used_template)
+                st.download_button(
+                    label="📕 تحميل الكشف المنسق (PDF جاهز للطباعة)",
+                    data=pdf_output,
+                    file_name=f"كشف_منسق_جاهز_{output_filename}.pdf",
+                    mime="application/pdf",
+                )
+            except Exception as e:
+                st.error(f"حدث خطأ أثناء إعداد PDF: {e}")
+        else:
+            st.warning("⚠️ يرجى تثبيت مكتبة `weasyprint` لتفعيل خاصية تحميل PDF.")
