@@ -3,11 +3,24 @@ import pandas as pd
 from io import BytesIO
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.enum.table import WD_TABLE_ALIGNMENT
-from docx.shared import Cm, Pt, RGBColor
+from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ALIGN_VERTICAL
+from docx.shared import Cm, Pt, RGBColor, Inches
 from docx.oxml import parse_xml, OxmlElement
 from docx.oxml.ns import nsdecls, qn
 import re
+
+# دعم تصدير PDF عبر weasyprint أو pdfkit حسب المتوفر في السيرفر
+try:
+    from weasyprint import HTML
+    WEASYPRINT_AVAILABLE = True
+except ImportError:
+    WEASYPRINT_AVAILABLE = False
+
+try:
+    import pdfkit
+    PDFKIT_AVAILABLE = True
+except ImportError:
+    PDFKIT_AVAILABLE = False
 
 # إعدادات واجهة المستخدم
 st.set_page_config(page_title="نظام تنسيق وتدقيق كشوفات الوكلاء", layout="wide")
@@ -31,7 +44,7 @@ if "processing_done" not in st.session_state:
     st.session_state.name_choice = ""
 
 # -----------------------------------------------------------------------------
-# مساعدات التنسيق المتقدمة لملفات Word عبر الـ XML
+# مساعدات التنسيق المتقدمة لملفات Word
 # -----------------------------------------------------------------------------
 def set_table_borders(table, color_hex="2A4B7C"):
     tblPr = table._tbl.tblPr
@@ -88,8 +101,40 @@ def format_cell_advanced(cell, text, bold=False, color_rgb=None, size_pt=16, fon
         rPr.append(rFonts)
         run.font.size = Pt(size_pt)
 
+def setup_document_layout(doc, filename_base, is_a3=False):
+    """إعداد هوامش الصفحة، الترويسة، والتذييل حسب المطلوب"""
+    for section in doc.sections:
+        if is_a3:
+            section.page_width, section.page_height = Cm(29.7), Cm(42.0)
+        section.top_margin, section.bottom_margin = Cm(0.5), Cm(0.5)
+        section.left_margin, section.right_margin = Cm(0.3), Cm(0.3)
+        
+        # ارتفاع الترويسة والتذييل
+        section.header_distance = Inches(0.2)
+        section.footer_distance = Inches(0.2)
+        
+        # فحص اسم الملف لاضافة الكلمة المناسبة في الترويسة
+        fname_lower = str(filename_base).lower()
+        header_text = ""
+        if "flour" in fname_lower:
+            header_text = "طحين"
+        elif "food" in fname_lower:
+            header_text = "غذائية"
+            
+        if header_text:
+            header = section.header
+            hp = header.paragraphs[0] if header.paragraphs else header.add_paragraph()
+            hp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            hp.paragraph_format.element.get_or_add_pPr().append(parse_xml(f'<w:bidi {nsdecls("w")}/>'))
+            run = hp.add_run(header_text)
+            run.font.name = "Calibri"
+            run._r.get_or_add_rPr().append(parse_xml(f'<w:cs w:val="Calibri"/>'))
+            run.font.size = Pt(16)
+            run.font.color.rgb = RGBColor(255, 0, 0)
+            run.bold = True
+
 # -----------------------------------------------------------------------------
-# محرك قراءة وتنظيف البيانات المطور (يدعم Word و Excel)
+# محرك قراءة وتنظيف البيانات المطور
 # -----------------------------------------------------------------------------
 def extract_and_clean_data(file_obj, card_choice, name_length_choice):
     raw_records = []
@@ -138,7 +183,6 @@ def extract_and_clean_data(file_obj, card_choice, name_length_choice):
         old_card_num = cells[card_indices[0]]
         new_card_num = cells[card_indices[1]] if len(card_indices) > 1 else old_card_num
         
-        # --- التعديل: إضافة منطق الفلتر الثالث (القديم والحديث) ---
         if card_choice == "رقم البطاقة الحديث":
             selected_card_num = new_card_num
         elif card_choice == "القديم والحديث":
@@ -148,7 +192,6 @@ def extract_and_clean_data(file_obj, card_choice, name_length_choice):
                 selected_card_num = old_card_num
         else:
             selected_card_num = old_card_num
-        # -----------------------------------------------------------
 
         digit_cells = [int(cells[i]) for i in range(name_idx) if cells[i].isdigit()]
         if len(digit_cells) >= 3:
@@ -181,12 +224,12 @@ def extract_and_clean_data(file_obj, card_choice, name_length_choice):
     return df
 
 # -----------------------------------------------------------------------------
-# دوال إنشاء النماذج (1 إلى 5)
+# دوال إنشاء النماذج (1 إلى 6) بصيغة Word
 # -----------------------------------------------------------------------------
 def build_professional_word_report(df, filename_base, card_choice):
     doc = Document()
-    for section in doc.sections:
-        section.top_margin, section.bottom_margin, section.left_margin, section.right_margin = Cm(0.5), Cm(0.5), Cm(0.3), Cm(0.3)
+    setup_document_layout(doc, filename_base)
+    
     clean_name = filename_base
     for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج"]: clean_name = clean_name.replace(w, "")
     clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', '', clean_name).split())
@@ -203,43 +246,53 @@ def build_professional_word_report(df, filename_base, card_choice):
     table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
     table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
     
+    # تنسيق الصف الأول (الارتفاع 0.6 انش والمحاذاة العمودية)
+    table.rows[0].height = Inches(0.6)
+    
     max_name_len = max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15)
     dynamic_name_width = Cm(max_name_len * 0.22 + 0.5)
-    col_widths = [Cm(0.9), dynamic_name_width, Cm(0.44), Cm(0.9), Cm(0.9), Cm(0.9), Cm(3.0), Cm(2.19)]
+    # عرض الملاحظات 1 إنش
+    col_widths = [Cm(0.9), dynamic_name_width, Cm(0.44), Cm(0.9), Cm(0.9), Cm(0.9), Cm(3.0), Inches(1.0)]
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
     
     for i, title in enumerate(headers):
-        table.rows[0].cells[i].width = col_widths[i]
+        cell = table.rows[0].cells[i]
+        cell.width = col_widths[i]
+        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
         if i in [3, 4, 5]:
-            set_cell_vertical_text(table.rows[0].cells[i])
-            format_cell_advanced(table.rows[0].cells[i], title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="center", color_rgb=COLOR_NAVY_BLUE)
+            set_cell_vertical_text(cell)
+            format_cell_advanced(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="center", color_rgb=COLOR_NAVY_BLUE)
         else:
-            format_cell_advanced(table.rows[0].cells[i], title, bold=True, size_pt=14, font_name="Segoe UI Semibold", align="left" if i==1 else "center", color_rgb=COLOR_NAVY_BLUE)
+            format_cell_advanced(cell, title, bold=True, size_pt=14, font_name="Segoe UI Semibold", align="left" if i==1 else "center", color_rgb=COLOR_NAVY_BLUE)
             
     for idx, row in df.iterrows():
-        row_cells = table.add_row().cells
+        new_row = table.add_row()
+        new_row.height = Inches(0.4)
+        row_cells = new_row.cells
         table.rows[idx+1]._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
         is_eligible_zero = int(row["مستحق"]) == 0
         set_cell_no_wrap(row_cells[1])
         
         for i in range(8):
-            row_cells[i].width = col_widths[i]
+            cell = row_cells[i]
+            cell.width = col_widths[i]
+            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
             val = row["ت"] if i==0 else row["اسم رب الأسرة"] if i==1 else "x" if i==2 and is_eligible_zero else "" if i==2 else row["الكلي"] if i==3 else row["مستحق"] if i==4 else row["محجوب"] if i==5 else row["رقم البطاقة"] if i==6 else "محجوب" if i==7 and is_eligible_zero else ""
             font_size = 14 if i==5 else 12 if i==7 and is_eligible_zero else 16
             text_color = RGBColor(203, 67, 53) if i==7 and is_eligible_zero else None
-            format_cell_advanced(row_cells[i], val, size_pt=font_size, font_name="Calibri", color_rgb=text_color, align="left" if i==1 else "center")
-            if is_eligible_zero: set_cell_background(row_cells[i], "EC7063")
+            format_cell_advanced(cell, val, size_pt=font_size, font_name="Calibri", color_rgb=text_color, align="left" if i==1 else "center")
+            if is_eligible_zero: set_cell_background(cell, "EC7063")
             else:
-                if i==0: set_cell_background(row_cells[i], "D4E6F1")
-                elif i==3: set_cell_background(row_cells[i], "EBF5FB")
-                elif i==4: set_cell_background(row_cells[i], "E8F8F5")
-                elif i==5: set_cell_background(row_cells[i], "FADBD8")
+                if i==0: set_cell_background(cell, "D4E6F1")
+                elif i==3: set_cell_background(cell, "EBF5FB")
+                elif i==4: set_cell_background(cell, "E8F8F5")
+                elif i==5: set_cell_background(cell, "FADBD8")
     return save_doc_buffer(doc, df)
 
 def build_professional_word_report_v2(df, filename_base, card_choice):
     doc = Document()
-    for section in doc.sections:
-        section.top_margin, section.bottom_margin, section.left_margin, section.right_margin = Cm(0.5), Cm(0.5), Cm(0.3), Cm(0.3)
+    setup_document_layout(doc, filename_base)
+    
     clean_name = filename_base
     for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج"]: clean_name = clean_name.replace(w, "")
     clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', '', clean_name).split())
@@ -253,35 +306,47 @@ def build_professional_word_report_v2(df, filename_base, card_choice):
     set_table_borders(table, "2A4B7C")
     table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
     table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
+    
+    table.rows[0].height = Inches(0.6)
+    
     dynamic_name_width = Cm(max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15) * 0.22 + 0.5)
     col_widths = [Cm(0.9), dynamic_name_width, Cm(0.80), Cm(0.80), Cm(0.9), Cm(0.9), Cm(0.9), Cm(3.0), Cm(1.80)]
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
+    
     for i, title in enumerate(headers):
-        table.rows[0].cells[i].width = col_widths[i]
-        if i in [4, 5, 6]: set_cell_vertical_text(table.rows[0].cells[i])
-        format_cell_advanced(table.rows[0].cells[i], title, bold=True, size_pt=14, font_name="Segoe UI Semibold", align="left" if i==1 else "center", color_rgb=COLOR_NAVY_BLUE)
+        cell = table.rows[0].cells[i]
+        cell.width = col_widths[i]
+        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        if i in [4, 5, 6]: set_cell_vertical_text(cell)
+        format_cell_advanced(cell, title, bold=True, size_pt=14, font_name="Segoe UI Semibold", align="left" if i==1 else "center", color_rgb=COLOR_NAVY_BLUE)
+        
     for idx, row in df.iterrows():
-        row_cells = table.add_row().cells
+        new_row = table.add_row()
+        new_row.height = Inches(0.4)
+        row_cells = new_row.cells
         table.rows[idx+1]._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
         is_eligible_zero = int(row["مستحق"]) == 0
         set_cell_no_wrap(row_cells[1])
+        
         for i in range(9):
-            row_cells[i].width = col_widths[i]
+            cell = row_cells[i]
+            cell.width = col_widths[i]
+            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
             val = row["ت"] if i==0 else row["اسم رب الأسرة"] if i==1 else "x" if i in [2,3] and is_eligible_zero else "" if i in [2,3] else row["الكلي"] if i==4 else row["مستحق"] if i==5 else row["محجوب"] if i==6 else row["رقم البطاقة"] if i==7 else "محجوب" if i==8 and is_eligible_zero else ""
             text_color = RGBColor(203, 67, 53) if i==8 and is_eligible_zero else None
-            format_cell_advanced(row_cells[i], val, size_pt=14, font_name="Calibri", color_rgb=text_color, align="left" if i==1 else "center")
-            if is_eligible_zero: set_cell_background(row_cells[i], "EC7063")
+            format_cell_advanced(cell, val, size_pt=14, font_name="Calibri", color_rgb=text_color, align="left" if i==1 else "center")
+            if is_eligible_zero: set_cell_background(cell, "EC7063")
             else:
-                if i==0: set_cell_background(row_cells[i], "D4E6F1")
-                elif i==4: set_cell_background(row_cells[i], "EBF5FB")
-                elif i==5: set_cell_background(row_cells[i], "E8F8F5")
-            if i==6: set_cell_background(row_cells[i], "E5E7E9")
+                if i==0: set_cell_background(cell, "D4E6F1")
+                elif i==4: set_cell_background(cell, "EBF5FB")
+                elif i==5: set_cell_background(cell, "E8F8F5")
+            if i==6: set_cell_background(cell, "E5E7E9")
     return save_doc_buffer(doc, df)
 
 def build_professional_word_report_v3(df, filename_base, card_choice):
     doc = Document()
-    for section in doc.sections:
-        section.top_margin, section.bottom_margin, section.left_margin, section.right_margin = Cm(0.5), Cm(0.5), Cm(0.3), Cm(0.3)
+    setup_document_layout(doc, filename_base)
+    
     clean_name = filename_base
     for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج"]: clean_name = clean_name.replace(w, "")
     clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', '', clean_name).split())
@@ -295,33 +360,45 @@ def build_professional_word_report_v3(df, filename_base, card_choice):
     set_table_borders(table, color_hex="2A4B7C")
     table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
     table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
+    
+    table.rows[0].height = Inches(0.6)
+    
     dynamic_name_width = Cm(max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15) * 0.22 + 0.5)
     col_widths = [Cm(0.9), dynamic_name_width, Cm(3.0), Cm(0.9), Cm(0.9), Cm(0.9), Cm(2.3), Cm(2.3), Cm(2.3), Cm(2.3)]
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
+    
     for i, title in enumerate(headers):
-        table.rows[0].cells[i].width = col_widths[i]
-        if i in [3, 4, 5]: set_cell_vertical_text(table.rows[0].cells[i])
-        format_cell_advanced(table.rows[0].cells[i], title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="left" if i == 1 else "center", color_rgb=COLOR_NAVY_BLUE)
+        cell = table.rows[0].cells[i]
+        cell.width = col_widths[i]
+        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        if i in [3, 4, 5]: set_cell_vertical_text(cell)
+        format_cell_advanced(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="left" if i == 1 else "center", color_rgb=COLOR_NAVY_BLUE)
+        
     for idx, row in df.iterrows():
-        row_cells = table.add_row().cells
+        new_row = table.add_row()
+        new_row.height = Inches(0.4)
+        row_cells = new_row.cells
         table.rows[idx+1]._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
         is_eligible_zero = int(row["مستحق"]) == 0
         set_cell_no_wrap(row_cells[1])
+        
         for i in range(10):
-            row_cells[i].width = col_widths[i]
+            cell = row_cells[i]
+            cell.width = col_widths[i]
+            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
             val = row["ت"] if i==0 else row["اسم رب الأسرة"] if i==1 else row["رقم البطاقة"] if i==2 else row["الكلي"] if i==3 else row["مستحق"] if i==4 else row["محجوب"] if i==5 else ""
-            format_cell_advanced(row_cells[i], val, size_pt=16, font_name="Calibri", color_rgb=None, align="left" if i==1 else "center")
-            if is_eligible_zero: set_cell_background(row_cells[i], "EC7063")
+            format_cell_advanced(cell, val, size_pt=16, font_name="Calibri", color_rgb=None, align="left" if i==1 else "center")
+            if is_eligible_zero: set_cell_background(cell, "EC7063")
             else:
-                if i == 0: set_cell_background(row_cells[i], "D4E6F1")
-            if i == 3: set_cell_background(row_cells[i], "E5E7E9")
-            if i == 5: set_cell_background(row_cells[i], "FCF3CF")
+                if i == 0: set_cell_background(cell, "D4E6F1")
+            if i == 3: set_cell_background(cell, "E5E7E9")
+            if i == 5: set_cell_background(cell, "FCF3CF")
     return save_doc_buffer(doc, df)
 
 def build_professional_word_report_v4(df, filename_base, card_choice):
     doc = Document()
-    for section in doc.sections:
-        section.top_margin, section.bottom_margin, section.left_margin, section.right_margin = Cm(0.5), Cm(0.5), Cm(0.3), Cm(0.3)
+    setup_document_layout(doc, filename_base)
+    
     clean_name = filename_base
     for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج"]: clean_name = clean_name.replace(w, "")
     clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', '', clean_name).split())
@@ -335,35 +412,45 @@ def build_professional_word_report_v4(df, filename_base, card_choice):
     set_table_borders(table, color_hex="2A4B7C")
     table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
     table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
+    
+    table.rows[0].height = Inches(0.6)
+    
     dynamic_name_width = Cm(max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15) * 0.22 + 0.5)
     col_widths = [Cm(0.9), Cm(2.5), dynamic_name_width, Cm(0.9)] + [Cm(1.05)] * 12 
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
+    
     hdr_cells = table.rows[0].cells
     for i, title in enumerate(headers):
-        hdr_cells[i].width = col_widths[i]
-        if i >= 3: set_cell_vertical_text(hdr_cells[i])
-        format_cell_advanced(hdr_cells[i], title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="left" if i == 2 else "center", color_rgb=COLOR_NAVY_BLUE)
+        cell = hdr_cells[i]
+        cell.width = col_widths[i]
+        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        if i >= 3: set_cell_vertical_text(cell)
+        format_cell_advanced(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="left" if i == 2 else "center", color_rgb=COLOR_NAVY_BLUE)
+        
     for idx, row in df.iterrows():
-        row_cells = table.add_row().cells
+        new_row = table.add_row()
+        new_row.height = Inches(0.4)
+        row_cells = new_row.cells
         table.rows[idx+1]._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
         is_eligible_zero = int(row["مستحق"]) == 0
         set_cell_no_wrap(row_cells[2])
+        
         for i in range(16):
-            row_cells[i].width = col_widths[i]
+            cell = row_cells[i]
+            cell.width = col_widths[i]
+            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
             val = row["ت"] if i == 0 else row["رقم البطاقة"] if i == 1 else row["اسم رب الأسرة"] if i == 2 else row["الكلي"] if i == 3 else ""
             cell_align = "left" if i == 2 else "center"
-            format_cell_advanced(row_cells[i], val, size_pt=14, font_name="Calibri", color_rgb=None, align=cell_align)
-            if is_eligible_zero: set_cell_background(row_cells[i], "EC7063")
+            format_cell_advanced(cell, val, size_pt=14, font_name="Calibri", color_rgb=None, align=cell_align)
+            if is_eligible_zero: set_cell_background(cell, "EC7063")
             else:
-                if i == 0: set_cell_background(row_cells[i], "D4E6F1")
-                if i == 3: set_cell_background(row_cells[i], "E8F8F5")
+                if i == 0: set_cell_background(cell, "D4E6F1")
+                if i == 3: set_cell_background(cell, "E8F8F5")
     return save_doc_buffer(doc, df)
 
 def build_professional_word_report_v5(df, filename_base, card_choice):
     doc = Document()
-    for section in doc.sections:
-        section.page_width, section.page_height = Cm(29.7), Cm(42.0)
-        section.top_margin, section.bottom_margin, section.left_margin, section.right_margin = Cm(0.5), Cm(0.5), Cm(0.5), Cm(0.5)
+    setup_document_layout(doc, filename_base, is_a3=True)
         
     clean_name = filename_base
     for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج"]: clean_name = clean_name.replace(w, "")
@@ -381,23 +468,31 @@ def build_professional_word_report_v5(df, filename_base, card_choice):
     table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
     table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
     
+    table.rows[0].height = Inches(0.6)
+    
     col_widths = [Cm(1.5), Cm(8.0), Cm(3.2), Cm(8.0), Cm(8.0)]
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
     COLOR_NAME_BLUE = RGBColor(0, 112, 192)
     COLOR_RED = RGBColor(255, 0, 0)
     
     for i, title in enumerate(headers):
-        table.rows[0].cells[i].width = col_widths[i]
-        format_cell_advanced(table.rows[0].cells[i], title, bold=True, size_pt=18, font_name="Microsoft Uighur", align="center", color_rgb=COLOR_NAVY_BLUE)
+        cell = table.rows[0].cells[i]
+        cell.width = col_widths[i]
+        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        format_cell_advanced(cell, title, bold=True, size_pt=18, font_name="Microsoft Uighur", align="center", color_rgb=COLOR_NAVY_BLUE)
             
     for idx, row in df.iterrows():
-        row_cells = table.add_row().cells
+        new_row = table.add_row()
+        new_row.height = Inches(0.4)
+        row_cells = new_row.cells
         table.rows[idx+1]._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
         is_eligible_zero = int(row["مستحق"]) == 0
         set_cell_no_wrap(row_cells[1])
         
         for i in range(5):
-            row_cells[i].width = col_widths[i]
+            cell = row_cells[i]
+            cell.width = col_widths[i]
+            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
             val = ""
             cell_align = "center"
             text_color = None
@@ -410,8 +505,70 @@ def build_professional_word_report_v5(df, filename_base, card_choice):
             elif i == 2: val = "x" if is_eligible_zero else row["مستحق"]
             elif i in [3, 4]: val = "XXXXXXXXXXXX" if is_eligible_zero else ""
                 
-            format_cell_advanced(row_cells[i], val, size_pt=16, font_name="Microsoft Uighur", color_rgb=text_color, align=cell_align)
+            format_cell_advanced(cell, val, size_pt=16, font_name="Microsoft Uighur", color_rgb=text_color, align=cell_align)
             
+    return save_doc_buffer(doc, df)
+
+def build_professional_word_report_v6(df, filename_base, card_choice):
+    doc = Document()
+    setup_document_layout(doc, filename_base)
+    
+    clean_name = filename_base
+    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج"]: clean_name = clean_name.replace(w, "")
+    clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', '', clean_name).split())
+    
+    title_p = doc.add_paragraph()
+    title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    title_run = title_p.add_run(f"الكشف الإحصائي المنسق للوكيل: {clean_name}")
+    title_run.font.name, title_run.font.size, title_run.bold = "Segoe UI Semibold", Pt(14), True
+    
+    # تغيير "العدد الكلي" إلى "العدد المستحق"
+    headers = ["ت", card_choice, "اسم المواطن", "العدد المستحق"] + [f"سلة {i}" for i in range(1, 13)]
+    table = doc.add_table(rows=1, cols=16)
+    table.style, table.alignment = 'Table Grid', WD_TABLE_ALIGNMENT.CENTER
+    set_table_borders(table, color_hex="2A4B7C")
+    table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
+    table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
+    
+    table.rows[0].height = Inches(0.6)
+    
+    dynamic_name_width = Cm(max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15) * 0.22 + 0.5)
+    col_widths = [Cm(0.9), Cm(2.5), dynamic_name_width, Cm(1.1)] + [Cm(1.05)] * 12 
+    COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
+    hdr_cells = table.rows[0].cells
+    
+    for i, title in enumerate(headers):
+        cell = hdr_cells[i]
+        cell.width = col_widths[i]
+        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        if i >= 3: set_cell_vertical_text(cell)
+        format_cell_advanced(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="left" if i == 2 else "center", color_rgb=COLOR_NAVY_BLUE)
+        
+    for idx, row in df.iterrows():
+        new_row = table.add_row()
+        new_row.height = Inches(0.4)
+        row_cells = new_row.cells
+        table.rows[idx+1]._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
+        is_eligible_zero = int(row["مستحق"]) == 0
+        set_cell_no_wrap(row_cells[2])
+        
+        for i in range(16):
+            cell = row_cells[i]
+            cell.width = col_widths[i]
+            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+            
+            # هنا التغيير لسحب بيانات "مستحق" بدلاً من "الكلي"
+            val = row["ت"] if i == 0 else row["رقم البطاقة"] if i == 1 else row["اسم رب الأسرة"] if i == 2 else row["مستحق"] if i == 3 else ""
+            cell_align = "left" if i == 2 else "center"
+            
+            format_cell_advanced(cell, val, size_pt=14, font_name="Calibri", color_rgb=None, align=cell_align)
+            
+            if is_eligible_zero: 
+                set_cell_background(cell, "EC7063")
+            else:
+                if i == 0: set_cell_background(cell, "D4E6F1")
+                if i == 3: set_cell_background(cell, "E8F8F5")
+                
     return save_doc_buffer(doc, df)
 
 def save_doc_buffer(doc, df):
@@ -458,19 +615,219 @@ def save_doc_buffer(doc, df):
     return buffer
 
 # -----------------------------------------------------------------------------
+# المحرك الجديد: إنشاء تقارير PDF
+# -----------------------------------------------------------------------------
+def build_pdf_report(df, filename_base, card_choice, template_choice):
+    clean_name = filename_base
+    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج"]: clean_name = clean_name.replace(w, "")
+    clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', '', clean_name).split())
+
+    total_all = df["الكلي"].astype(int).sum()
+    total_eligible = df["مستحق"].astype(int).sum()
+    total_withheld = df["محجوب"].astype(int).sum()
+
+    page_orientation = "portrait"
+    page_size = "A4"
+    
+    if template_choice == "النموذج الأول (الأصلي المطور)":
+        headers = ["ت", "اسم رب الأسرة", "حقل فارغ", "الكلي", "مستحق", "محجوب", card_choice, "ملاحظات"]
+    elif template_choice == "النموذج الثاني (حجم 14 وحقلين فارغين)":
+        headers = ["ت", "اسم رب الأسرة", "حقل فارغ 1", "حقل فارغ 2", "الكلي", "مستحق", "محجوب", card_choice, "ملاحظات"]
+    elif template_choice == "النموذج الثالث (خط 16، عناوين 12، 4 أشهر)":
+        headers = ["ت", "اسم رب الأسرة", card_choice, "الكلي", "مستحق", "محجوب", "الشهر الأول", "الشهر الثاني", "الشهر الثالث", "الشهر الرابع"]
+    elif template_choice == "النموذج الرابع (12 سلة، العدد الكلي)":
+        headers = ["ت", card_choice, "اسم المواطن", "العدد الكلي"] + [f"سلة {i}" for i in range(1, 13)]
+        page_orientation = "landscape"
+    elif template_choice == "النموذج السادس (12 سلة، العدد المستحق)":
+        headers = ["ت", card_choice, "اسم المواطن", "العدد المستحق"] + [f"سلة {i}" for i in range(1, 13)]
+        page_orientation = "landscape"
+    else:
+        headers = ["ت", "اسم رب الأسرة", "عدد الأفراد المستحقة", "حقل كبير فارغ", "حقل كبير فارغ"]
+        page_size = "A3"
+        page_orientation = "landscape"
+
+    rows_html = ""
+    for idx, row in df.iterrows():
+        is_eligible_zero = int(row["مستحق"]) == 0
+        row_bg = "background-color: #EC7063;" if is_eligible_zero else ""
+        
+        cells_html = ""
+        
+        if template_choice == "النموذج الأول (الأصلي المطور)":
+            vals = [
+                (row["ت"], "background-color: #D4E6F1;" if not is_eligible_zero else ""),
+                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                ("x" if is_eligible_zero else "", ""),
+                (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
+                (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
+                (row["محجوب"], "background-color: #FADBD8;" if not is_eligible_zero else ""),
+                (row["رقم البطاقة"], ""),
+                ("محجوب" if is_eligible_zero else "", "color: #CB4335; font-weight: bold;" if is_eligible_zero else "")
+            ]
+        elif template_choice == "النموذج الثاني (حجم 14 وحقلين فارغين)":
+            vals = [
+                (row["ت"], "background-color: #D4E6F1;" if not is_eligible_zero else ""),
+                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                ("x" if is_eligible_zero else "", ""),
+                ("x" if is_eligible_zero else "", ""),
+                (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
+                (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
+                (row["محجوب"], "background-color: #E5E7E9;" if not is_eligible_zero else ""),
+                (row["رقم البطاقة"], ""),
+                ("محجوب" if is_eligible_zero else "", "color: #CB4335; font-weight: bold;" if is_eligible_zero else "")
+            ]
+        elif template_choice == "النموذج الثالث (خط 16، عناوين 12، 4 أشهر)":
+            vals = [
+                (row["ت"], "background-color: #D4E6F1;" if not is_eligible_zero else ""),
+                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                (row["رقم البطاقة"], ""),
+                (row["الكلي"], "background-color: #E5E7E9;" if not is_eligible_zero else ""),
+                (row["مستحق"], ""),
+                (row["محجوب"], "background-color: #FCF3CF;" if not is_eligible_zero else ""),
+                ("", ""), ("", ""), ("", ""), ("", "")
+            ]
+        elif template_choice == "النموذج الرابع (12 سلة، العدد الكلي)":
+            vals = [
+                (row["ت"], "background-color: #D4E6F1;" if not is_eligible_zero else ""),
+                (row["رقم البطاقة"], ""),
+                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                (row["الكلي"], "background-color: #E8F8F5;" if not is_eligible_zero else "")
+            ] + [("", "")] * 12
+        elif template_choice == "النموذج السادس (12 سلة، العدد المستحق)":
+            vals = [
+                (row["ت"], "background-color: #D4E6F1;" if not is_eligible_zero else ""),
+                (row["رقم البطاقة"], ""),
+                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else "")
+            ] + [("", "")] * 12
+        else:
+            vals = [
+                (row["ت"], ""),
+                (row["اسم رب الأسرة"], f"text-align: right; font-weight: bold; color: {'#FF0000' if is_eligible_zero else '#0070C0'};"),
+                ("x" if is_eligible_zero else row["مستحق"], ""),
+                ("XXXXXXXXXXXX" if is_eligible_zero else "", ""),
+                ("XXXXXXXXXXXX" if is_eligible_zero else "", "")
+            ]
+
+        for val, style in vals:
+            cell_style = f"{row_bg} {style}"
+            cells_html += f'<td style="{cell_style}">{val}</td>'
+            
+        rows_html += f'<tr>{cells_html}</tr>'
+
+    headers_html = "".join([f'<th>{h}</th>' for h in headers])
+
+    html_doc = f"""
+    <!DOCTYPE html>
+    <html dir="rtl" lang="ar">
+    <head>
+        <meta charset="utf-8">
+        <style>
+            @page {{
+                size: {page_size} {page_orientation};
+                margin: 8mm 6mm;
+                @bottom-center {{
+                    content: "صفحة " counter(page);
+                    font-size: 10pt;
+                    font-family: Arial, sans-serif;
+                }}
+            }}
+            body {{
+                font-family: 'Segoe UI', 'Arial', sans-serif;
+                direction: rtl;
+                margin: 0;
+                padding: 0;
+            }}
+            .title {{
+                text-align: right;
+                font-size: 14pt;
+                font-weight: bold;
+                color: #2A4B7C;
+                margin-bottom: 8px;
+            }}
+            table {{
+                width: 100%;
+                border-collapse: collapse;
+                font-size: 11pt;
+            }}
+            th {{
+                background-color: #F2F4F8;
+                color: #2A4B7C;
+                border: 1px solid #2A4B7C;
+                padding: 6px 4px;
+                text-align: center;
+                font-weight: bold;
+            }}
+            td {{
+                border: 1px solid #2A4B7C;
+                padding: 4px 3px;
+                text-align: center;
+                vertical-align: middle;
+                white-space: nowrap;
+            }}
+            .stats {{
+                margin-top: 12px;
+                text-align: right;
+                font-weight: bold;
+                font-size: 12pt;
+                color: #2A4B7C;
+                line-height: 1.5;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="title">الكشف الإحصائي المنسق للوكيل: {clean_name}</div>
+        <table>
+            <thead>
+                <tr>{headers_html}</tr>
+            </thead>
+            <tbody>
+                {rows_html}
+            </tbody>
+        </table>
+        <div class="stats">
+            العدد الكلي للافراد = {total_all}<br>
+            العدد الكلي للمستحقين = {total_eligible}<br>
+            العدد الكلي للمحجوبين = {total_withheld}
+        </div>
+    </body>
+    </html>
+    """
+    
+    if PDFKIT_AVAILABLE:
+        options = {
+            'page-size': page_size,
+            'orientation': 'Landscape' if page_orientation == 'landscape' else 'Portrait',
+            'encoding': 'UTF-8',
+            'margin-top': '8mm',
+            'margin-right': '6mm',
+            'margin-bottom': '8mm',
+            'margin-left': '6mm',
+            'custom-header': [('Accept-Encoding', 'gzip')],
+            'no-outline': None
+        }
+        pdf_bytes = pdfkit.from_string(html_doc, False, options=options)
+        pdf_buffer = BytesIO(pdf_bytes)
+        return pdf_buffer
+    elif WEASYPRINT_AVAILABLE:
+        pdf_buffer = BytesIO()
+        HTML(string=html_doc).write_pdf(pdf_buffer)
+        pdf_buffer.seek(0)
+        return pdf_buffer
+    else:
+        raise Exception("لا توجد مكتبة PDF مثبتة (pdfkit أو weasyprint).")
+
+# -----------------------------------------------------------------------------
 # واجهة استخدام التطبيق (Streamlit Interface)
 # -----------------------------------------------------------------------------
 st.markdown("<h3 style='text-align: right;'>📂 رفع الكشف المراد تدقيقه وتنسيقه للمطبعة</h3>", unsafe_allow_html=True)
-# التعديل: تفعيل رفع أكثر من ملف للتمكن من دمج ملفين أو أكثر في نفس الوقت
 uploaded_files = st.file_uploader("ارفع كشف الوكلاء (يمكنك رفع ملف أو أكثر لدمجهم سوياً)", type=['docx', 'xlsx'], accept_multiple_files=True, key="doc_input_v8", label_visibility="collapsed")
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# تقسيم الخيارات إلى 3 أعمدة
 col1, col2, col3 = st.columns([1, 1, 2])
 
 with col1:
-    # التعديل: إضافة خيار "القديم والحديث"
     selected_card = st.radio(
         "📄 اختر نوع رقم البطاقة:",
         ["رقم البطاقة القديم", "رقم البطاقة الحديث", "القديم والحديث"],
@@ -494,7 +851,8 @@ with col3:
             "النموذج الثاني (حجم 14 وحقلين فارغين)",
             "النموذج الثالث (خط 16، عناوين 12، 4 أشهر)",
             "النموذج الرابع (12 سلة، العدد الكلي)",
-            "النموذج الخامس (ورقة A3، حقول كبيرة، خط Uighur)"
+            "النموذج الخامس (ورقة A3، حقول كبيرة، خط Uighur)",
+            "النموذج السادس (12 سلة، العدد المستحق)"
         ],
         index=0,
         horizontal=False
@@ -521,13 +879,11 @@ if st.button("⚙️ تشغيل محرك التنظيم والتنسيق الم�
                         all_extracted_dfs.append(df_res)
                 
                 if all_extracted_dfs:
-                    # التعديل: دمج جميع الملفات المرفوعة، وإعادة الفرز الأبجدي الشامل، وإعادة ضبط الترقيم
                     merged_df = pd.concat(all_extracted_dfs, ignore_index=True)
                     merged_df = merged_df.sort_values(by="اسم رب الأسرة").reset_index(drop=True)
                     merged_df["ت"] = merged_df.index + 1
                     
                     st.session_state.df_final = merged_df
-                    # تسمية الملف المخرج بحسب عدد الملفات المرفوعة
                     if len(uploaded_files) > 1:
                         st.session_state.output_filename = "مدمج_" + "_".join([f.name.rsplit('.', 1)[0][:10] for f in uploaded_files])
                     else:
@@ -552,7 +908,7 @@ if st.session_state.processing_done:
     
     st.success(f"✅ تم الدمج والتنظيم الأبجدي بنجاح لـ ({len(df_final)}) قيد اسم.")
     
-    with st.spinner('جاري صياغة وهيكلة مستند Word المطور المختار...'):
+    with st.spinner('جاري صياغة وهيكلة مستندات Word و PDF المكتملة...'):
         if used_template == "النموذج الأول (الأصلي المطور)":
             word_output = build_professional_word_report(df_final, output_filename, used_card_type)
         elif used_template == "النموذج الثاني (حجم 14 وحقلين فارغين)":
@@ -561,12 +917,34 @@ if st.session_state.processing_done:
             word_output = build_professional_word_report_v3(df_final, output_filename, used_card_type)
         elif used_template == "النموذج الرابع (12 سلة، العدد الكلي)":
             word_output = build_professional_word_report_v4(df_final, output_filename, used_card_type)
+        elif used_template == "النموذج السادس (12 سلة، العدد المستحق)":
+            word_output = build_professional_word_report_v6(df_final, output_filename, used_card_type)
         else:
             word_output = build_professional_word_report_v5(df_final, output_filename, used_card_type)
+
+    # عرض خيارات التحميل جنباً إلى جنب (Word و PDF)
+    st.markdown("### 📥 خيارات التحميل الفوري:")
+    dl_col1, dl_col2 = st.columns(2)
+    
+    with dl_col1:
+        st.download_button(
+            label="📄 تحميل الكشف المنسق (Word)",
+            data=word_output,
+            file_name=f"كشف_منسق_جاهز_{output_filename}.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
         
-    st.download_button(
-        label="📥 تحميل كشف الوكلاء المنسق والجاهز للطباعة فوراً (Word)",
-        data=word_output,
-        file_name=f"كشف_منسق_جاهز_{output_filename}.docx",
-        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    )
+    with dl_col2:
+        if PDFKIT_AVAILABLE or WEASYPRINT_AVAILABLE:
+            try:
+                pdf_output = build_pdf_report(df_final, output_filename, used_card_type, used_template)
+                st.download_button(
+                    label="📕 تحميل الكشف المنسق (PDF جاهز للطباعة)",
+                    data=pdf_output,
+                    file_name=f"كشف_منسق_جاهز_{output_filename}.pdf",
+                    mime="application/pdf",
+                )
+            except Exception as e:
+                st.error(f"حدث خطأ أثناء إعداد PDF: {e}")
+        else:
+            st.warning("⚠️ يرجى تثبيت مكتبة `pdfkit` أو `weasyprint` لتفعيل خاصية تحميل PDF.")
