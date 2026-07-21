@@ -13,7 +13,7 @@ import re
 try:
     from weasyprint import HTML
     WEASYPRINT_AVAILABLE = True
-except Exception:  # التعديل الجذري هنا
+except Exception:  
     WEASYPRINT_AVAILABLE = False
 
 try:
@@ -128,7 +128,8 @@ def setup_document_layout(doc, filename_base, is_a3=False):
             hp.paragraph_format.element.get_or_add_pPr().append(parse_xml(f'<w:bidi {nsdecls("w")}/>'))
             run = hp.add_run(header_text)
             run.font.name = "Calibri"
-            run._r.get_or_add_rPr().append(parse_xml(f'<w:cs w:val="Calibri"/>'))
+            # ✅ تم إضافة تعريف مساحة الأسماء (nsdecls) في السطر التالي لحل الخطأ
+            run._r.get_or_add_rPr().append(parse_xml(f'<w:cs {nsdecls("w")} w:val="Calibri"/>'))
             run.font.size = Pt(16)
             run.font.color.rgb = RGBColor(255, 0, 0)
             run.bold = True
