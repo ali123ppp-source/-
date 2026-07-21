@@ -3,3 +3,4 @@ pandas
 python-docx
 openpyxl
 xlsxwriter
+pdfkit
