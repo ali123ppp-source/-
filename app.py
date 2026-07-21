@@ -9,17 +9,17 @@ from docx.oxml import parse_xml, OxmlElement
 from docx.oxml.ns import nsdecls, qn
 import re
 
-# دعم تصدير PDF عبر weasyprint أو pdfkit حسب المتوفر في السيرفر
+# تم تعديل الاستثناء هنا ليتجاهل خطأ OSError تماماً بدلاً من توقف التطبيق
 try:
     from weasyprint import HTML
     WEASYPRINT_AVAILABLE = True
-except ImportError:
+except Exception:  # التعديل الجذري هنا
     WEASYPRINT_AVAILABLE = False
 
 try:
     import pdfkit
     PDFKIT_AVAILABLE = True
-except ImportError:
+except Exception:
     PDFKIT_AVAILABLE = False
 
 # إعدادات واجهة المستخدم
