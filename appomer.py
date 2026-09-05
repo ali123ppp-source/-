@@ -29,6 +29,9 @@ if "processing_done" not in st.session_state:
     st.session_state.selected_card = ""
     st.session_state.template_choice = ""
     st.session_state.input_format_choice = ""
+    st.session_state.reference_filename = ""
+    st.session_state.corrections_df = None
+    st.session_state.unresolved_df = None
 
 # -----------------------------------------------------------------------------
 # مساعدات التنسيق المتقدمة لملفات Word عبر الـ XML
@@ -282,6 +285,199 @@ def extract_ration_list_data(file_obj, card_choice):
         df = df.sort_values(by="اسم رب الأسرة").reset_index(drop=True)
         df.insert(0, "ت", df.index + 1)
     return df
+
+# -----------------------------------------------------------------------------
+# محرك "قاعدة الأسماء الصحيحة" - لتصحيح الأسماء التالفة/المقلوبة اعتماداً على
+# مطابقة رقم البطاقة التموينية فقط (وليس الاسم، لأن الاسم هو الحقل المشكوك فيه)
+# -----------------------------------------------------------------------------
+def build_name_reference_map(file_obj):
+    """
+    يقرأ ملف قاعدة الأسماء الصحيحة (xlsx أو docx) ويبني خريطة:
+    رقم البطاقة -> الاسم الصحيح الكامل.
+    يلتقط كل رقم بطاقة (5 أرقام فأكثر) موجود بالصف - سواء كان قديماً أو جديداً -
+    وينسبه لنفس الاسم، لضمان المطابقة أياً كان نوع الرقم المستخدم في الملف الرئيسي.
+    """
+    file_ext = file_obj.name.split('.')[-1].lower()
+    rows_data = []
+
+    if file_ext == 'docx':
+        doc = Document(file_obj)
+        for table in doc.tables:
+            for row in table.rows:
+                cells = [cell.text.strip().replace('\n', ' ') for cell in row.cells]
+                rows_data.append(cells)
+    elif file_ext == 'xlsx':
+        xls = pd.ExcelFile(file_obj)
+        for sheet_name in xls.sheet_names:
+            df_excel = pd.read_excel(xls, sheet_name=sheet_name, header=None)
+            for row in df_excel.values:
+                cells = []
+                for cell in row:
+                    if pd.isna(cell):
+                        continue
+                    if isinstance(cell, float) and cell.is_integer():
+                        cells.append(str(int(cell)))
+                    else:
+                        cells.append(str(cell).strip().replace('\n', ' '))
+                rows_data.append(cells)
+
+    reference_map = {}
+    for cells in rows_data:
+        if not any(cells):
+            continue
+        joined = "".join(cells)
+        if "المركز" in joined or "الوكيل" in joined or "اسم رب" in joined or "اسم العائلة" in joined:
+            continue
+
+        name_idx, max_len = -1, 0
+        for i, c in enumerate(cells):
+            if any('\u0600' <= ch <= '\u06FF' for ch in c) and not any(ch.isdigit() for ch in c):
+                if len(c) > max_len:
+                    max_len, name_idx = len(c), i
+        if name_idx == -1:
+            continue
+
+        correct_name = cells[name_idx].strip()
+        if not correct_name:
+            continue
+
+        for c in cells:
+            if c.isdigit() and len(c) >= 5:
+                reference_map[c] = correct_name
+
+    return reference_map
+
+def normalize_name_for_compare(name):
+    """توحيد بسيط لأشكال الحروف والمسافات فقط لغرض المقارنة (لا يُستخدم كقيمة نهائية)."""
+    n = re.sub(r'\s+', ' ', str(name).strip())
+    n = n.replace('أ', 'ا').replace('إ', 'ا').replace('آ', 'ا').replace('ى', 'ي')
+    return n
+
+def apply_name_corrections(df, reference_map):
+    """
+    يفحص كل سجل: إن كان رقم بطاقته موجوداً في قاعدة الأسماء الصحيحة والاسم مختلف عنها،
+    يستبدل حقل الاسم فقط بالاسم الصحيح من القاعدة (بقية الأعمدة تبقى كما هي دون أي مساس)،
+    ويعيد الترتيب الأبجدي وإعادة ترقيم "ت"، مع تسجيل كل استبدال في تقرير منفصل.
+    """
+    if df.empty or not reference_map:
+        return df, pd.DataFrame(columns=["رقم البطاقة", "الاسم قبل التصحيح", "الاسم بعد التصحيح"])
+
+    df = df.copy()
+    corrections = []
+
+    for idx, row in df.iterrows():
+        card = str(row["رقم البطاقة"]).strip()
+        if card in reference_map:
+            correct_three_part = " ".join(reference_map[card].split()[:3])
+            current_name = str(row["اسم رب الأسرة"]).strip()
+
+            if normalize_name_for_compare(current_name) != normalize_name_for_compare(correct_three_part):
+                corrections.append({
+                    "رقم البطاقة": card,
+                    "الاسم قبل التصحيح": current_name,
+                    "الاسم بعد التصحيح": correct_three_part
+                })
+                df.at[idx, "اسم رب الأسرة"] = correct_three_part
+
+    df = df.sort_values(by="اسم رب الأسرة").reset_index(drop=True)
+    df["ت"] = df.index + 1
+
+    return df, pd.DataFrame(corrections)
+
+def light_auto_clean_name(name):
+    """
+    تنظيف سطحي آمن فقط: إزالة أي رموز/أرقام/حروف غير عربية عالقة بالاسم وضغط المسافات.
+    لا يحاول إطلاقاً تخمين حروف ناقصة أو إعادة ترتيب حروف مبعثرة - فقط إزالة الشوائب الواضحة.
+    """
+    if not name:
+        return ""
+    n = re.sub(r'[^\u0600-\u06FF\s]', ' ', str(name))
+    return re.sub(r'\s+', ' ', n).strip()
+
+def build_known_name_tokens(reference_map):
+    """يبني مجموعة كل مقاطع الأسماء (الكلمات) الظاهرة في قاعدة الأسماء الصحيحة، لاستخدامها كقاموس مرجعي."""
+    tokens = set()
+    for name in reference_map.values():
+        tokens.update(name.split())
+    return tokens
+
+def detect_suspicious_name(name, known_tokens=None):
+    """
+    فحص إرشادي لاكتشاف الأسماء المشتبه بتلفها/عدم وضوحها لسجلات لا يوجد لها
+    أي مرجع في قاعدة الأسماء الصحيحة (غالباً سجلات جديدة لم تُضف للقاعدة بعد).
+    إن تم تمرير known_tokens (قاموس مقاطع الأسماء المعروفة من القاعدة)، يُضاف فحص إضافي
+    يكتشف الأحرف المخربطة التي تشكّل كلمة تبدو سليمة هيكلياً لكنها غير موجودة في القاموس.
+    يُرجع: (هل الاسم مشتبه به، قائمة أسباب الاشتباه)
+    """
+    reasons = []
+    original = str(name).strip()
+
+    if not original:
+        return True, ["الاسم فارغ"]
+
+    if any(not ('\u0600' <= ch <= '\u06FF' or ch.isspace()) for ch in original):
+        reasons.append("يحتوي على رموز/أرقام/حروف غير عربية")
+
+    words = original.split()
+    if len(words) < 3:
+        reasons.append(f"الاسم غير مكتمل ({len(words)} من 3 مقاطع متوقعة)")
+
+    if any(len(w) <= 1 for w in words):
+        reasons.append("يحتوي على مقطع من حرف واحد فقط (قد يكون ناقصاً)")
+
+    if re.search(r'(.)\1{2,}', original):
+        reasons.append("يحتوي على تكرار غير طبيعي لحرف واحد")
+
+    if not light_auto_clean_name(original):
+        reasons.append("الاسم بعد إزالة الشوائب أصبح فارغاً - على الأغلب غير مقروء بالكامل")
+
+    if known_tokens:
+        unknown_words = [w for w in words if len(w) > 1 and w not in known_tokens]
+        if unknown_words:
+            reasons.append(f"يحتوي على مقطع/مقاطع غير موجودة ضمن قائمة الأسماء المعروفة بالقاعدة: {', '.join(unknown_words)} (قد يكون محرَّفاً بتبديل حروف)")
+
+    return (len(reasons) > 0), reasons
+
+def flag_unresolved_suspicious_names(df, reference_map):
+    """
+    يفحص السجلات التي لم يُعثر لرقم بطاقتها على أي مقابل في قاعدة الأسماء الصحيحة،
+    ويكتشف من بينها ما يبدو اسمه تالفاً أو غير مفهوم، مع اقتراح تنظيف سطحي (بدون تخمين)،
+    ويعيدها كتقرير مراجعة يدوية منفصل - هذه السجلات لا يمكن تصحيحها تلقائياً لعدم وجود مرجع لها.
+    """
+    known_tokens = build_known_name_tokens(reference_map) if reference_map else None
+    flagged = []
+    for _, row in df.iterrows():
+        card = str(row["رقم البطاقة"]).strip()
+        if card in reference_map:
+            continue  # هذه عولجت بالفعل عبر المطابقة المباشرة
+        name = str(row["اسم رب الأسرة"]).strip()
+        is_suspicious, reasons = detect_suspicious_name(name, known_tokens)
+        if is_suspicious:
+            flagged.append({
+                "رقم البطاقة": card,
+                "الاسم الحالي": name,
+                "اقتراح تنظيف سطحي (بدون تخمين)": light_auto_clean_name(name) or "—",
+                "سبب الاشتباه": "، ".join(reasons)
+            })
+    return pd.DataFrame(flagged)
+
+def build_corrections_report_excel(corrections_df, unresolved_df=None):
+    """يبني ملف Excel بتقريرين: الأسماء المصحَّحة تلقائياً من القاعدة، والأسماء المشتبه بها التي تحتاج مراجعة يدوية."""
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+        if corrections_df is None or corrections_df.empty:
+            pd.DataFrame({"ملاحظة": ["لم يتم العثور على أي استبدالات لهذه الدفعة"]}).to_excel(
+                writer, index=False, sheet_name="تم تصحيحها تلقائياً")
+        else:
+            corrections_df.to_excel(writer, index=False, sheet_name="تم تصحيحها تلقائياً")
+
+        if unresolved_df is not None and not unresolved_df.empty:
+            unresolved_df.to_excel(writer, index=False, sheet_name="تحتاج مراجعة يدوية")
+        else:
+            pd.DataFrame({"ملاحظة": ["لا توجد أسماء مشتبه بها غير موجودة بالقاعدة"]}).to_excel(
+                writer, index=False, sheet_name="تحتاج مراجعة يدوية")
+    buffer.seek(0)
+    return buffer
 
 # -----------------------------------------------------------------------------
 # محرك بناء تقرير Word - النموذج الأول (الأصلي)
@@ -618,6 +814,15 @@ st.markdown("<h3 style='text-align: right;'>📂 رفع الكشف المراد 
 # تعديل شريط الرفع ليقبل ملفات إكسل بصيغة xlsx إلى جانب الـ docx
 uploaded_file = st.file_uploader("ارفع كشف الوكلاء", type=['docx', 'xlsx'], key="doc_input_v6", label_visibility="collapsed")
 
+st.markdown("<h4 style='text-align: right;'>📚 قاعدة الأسماء الصحيحة (اختياري) - لتصحيح الأسماء التالفة أو المقلوبة</h4>", unsafe_allow_html=True)
+reference_file = st.file_uploader(
+    "ارفع ملف قاعدة الأسماء الصحيحة",
+    type=['xlsx', 'docx'],
+    key="ref_db_input_v1",
+    label_visibility="collapsed",
+    help="ملف يحتوي على أرقام البطاقات مع الأسماء الصحيحة الكاملة. سيتم استخدامه لمطابقة رقم البطاقة تلقائياً واستبدال أي اسم تالف أو مقلوب بالاسم الصحيح."
+)
+
 st.markdown("<br>", unsafe_allow_html=True)
 
 col1, col2, col3 = st.columns([1, 1.4, 1.4])
@@ -659,10 +864,12 @@ st.markdown("<br>", unsafe_allow_html=True)
 
 if uploaded_file:
     current_filename = uploaded_file.name.rsplit('.', 1)[0]
+    current_ref_name = reference_file.name if reference_file else ""
     if (st.session_state.output_filename != current_filename or 
         st.session_state.selected_card != selected_card or 
         st.session_state.template_choice != template_choice or
-        st.session_state.input_format_choice != input_format_choice):
+        st.session_state.input_format_choice != input_format_choice or
+        st.session_state.reference_filename != current_ref_name):
         st.session_state.processing_done = False
 
 if st.button("⚙️ تشغيل محرك التنظيم والتنسيق المتقدم الكلي"):
@@ -679,11 +886,22 @@ if st.button("⚙️ تشغيل محرك التنظيم والتنسيق الم�
                         st.error("لم يتم العثور على بيانات جداول متوافقة.")
 
                 if not df_res.empty:
+                    corrections_df = pd.DataFrame(columns=["رقم البطاقة", "الاسم قبل التصحيح", "الاسم بعد التصحيح"])
+                    unresolved_df = pd.DataFrame()
+                    if reference_file:
+                        with st.spinner('جاري مطابقة الأسماء مع قاعدة الأسماء الصحيحة...'):
+                            reference_map = build_name_reference_map(reference_file)
+                            df_res, corrections_df = apply_name_corrections(df_res, reference_map)
+                            unresolved_df = flag_unresolved_suspicious_names(df_res, reference_map)
+
                     st.session_state.df_final = df_res
+                    st.session_state.corrections_df = corrections_df
+                    st.session_state.unresolved_df = unresolved_df
                     st.session_state.output_filename = uploaded_file.name.rsplit('.', 1)[0]
                     st.session_state.selected_card = selected_card
                     st.session_state.template_choice = template_choice
                     st.session_state.input_format_choice = input_format_choice
+                    st.session_state.reference_filename = reference_file.name if reference_file else ""
                     st.session_state.processing_done = True
             except Exception as e:
                 st.error(f"خطأ غير متوقع: {e}")
@@ -697,7 +915,35 @@ if st.session_state.processing_done:
     used_template = st.session_state.template_choice
     
     st.success(f"✅ تم التنظيم الأبجدي بنجاح لـ ({len(df_final)}) قيد اسم (تم قصرها على الاسم الثلاثي).")
-    
+
+    corrections_df = st.session_state.corrections_df
+    unresolved_df = st.session_state.unresolved_df
+
+    if corrections_df is not None and not corrections_df.empty:
+        st.markdown(
+            f"<div class='report-box'>🛠️ تم تصحيح <b>{len(corrections_df)}</b> اسم تالف/مقلوب اعتماداً على مطابقة رقم البطاقة مع قاعدة الأسماء الصحيحة.</div>",
+            unsafe_allow_html=True
+        )
+        st.dataframe(corrections_df, use_container_width=True)
+    elif reference_file:
+        st.info("ℹ️ لم يتم العثور على أي أسماء تحتاج تصحيحاً بمطابقة أرقام البطاقات مع القاعدة المرفوعة.")
+
+    if unresolved_df is not None and not unresolved_df.empty:
+        st.markdown(
+            f"<div class='report-box' style='border-right-color:#CB4335;'>⚠️ يوجد <b>{len(unresolved_df)}</b> اسم مشتبه بتلفه لسجلات <b>غير موجودة في القاعدة</b> (على الأغلب مضافة حديثاً)، ولا يمكن تصحيحها تلقائياً لعدم وجود مرجع لها - يُرجى مراجعتها يدوياً ثم إضافتها للقاعدة مستقبلاً.</div>",
+            unsafe_allow_html=True
+        )
+        st.dataframe(unresolved_df, use_container_width=True)
+
+    if reference_file and ((corrections_df is not None and not corrections_df.empty) or (unresolved_df is not None and not unresolved_df.empty)):
+        corrections_report = build_corrections_report_excel(corrections_df, unresolved_df)
+        st.download_button(
+            label="📥 تحميل تقرير تصحيح ومراجعة الأسماء (Excel - ورقتين)",
+            data=corrections_report,
+            file_name=f"تقرير_تصحيح_الاسماء_{output_filename}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
     with st.spinner('جاري صياغة وهيكلة مستند Word المطور المختار...'):
         if used_template == "النموذج الأول (الأصلي المطور)":
             word_output = build_professional_word_report(df_final, output_filename, used_card_type)
