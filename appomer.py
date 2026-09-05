@@ -75,14 +75,29 @@ def save_doc_buffer(doc, df):
     return buffer
 
 # ==========================================
-# 3. محرك استخراج وتنظيف البيانات
+# 3. محرك استخراج وتنظيف البيانات (قراءة الوورد والإكسل)
 # ==========================================
+def extract_data_from_word(uploaded_file):
+    """قراءة الجداول من ملف Word وتحويلها إلى DataFrame"""
+    doc = Document(uploaded_file)
+    data = []
+    keys = None
+    
+    # استخراج البيانات من أول جدول موجود في ملف الوورد
+    if doc.tables:
+        table = doc.tables[0]
+        for i, row in enumerate(table.rows):
+            text = [cell.text.strip() for cell in row.cells]
+            if i == 0:
+                keys = text  # الصف الأول يعتبر عناوين الأعمدة
+                continue
+            row_data = dict(zip(keys, text))
+            data.append(row_data)
+            
+    return pd.DataFrame(data)
+
 def extract_and_clean_data(df):
-    """
-    (قم بوضع الكود الخاص بك هنا لتنظيف البيانات، 
-    حالياً نعتبر أن البيانات تأتي بأسماء الأعمدة المطلوبة)
-    """
-    # مثال مبسط للتأكد من وجود الأعمدة
+    """تنظيف البيانات وتجهيز الأعمدة"""
     required_cols = ["ت", "اسم رب الأسرة", "الكلي", "مستحق", "محجوب"]
     for col in required_cols:
         if col not in df.columns:
@@ -94,7 +109,7 @@ def extract_and_clean_data(df):
     return df
 
 # ==========================================
-# 4. محركات بناء تقارير Word (النماذج V1 إلى V4 - مبسطة كمثال)
+# 4. محركات بناء تقارير Word (النماذج V1 إلى V4)
 # ==========================================
 def build_professional_word_report(df, filename_base, card_choice):
     doc = Document()
@@ -122,7 +137,7 @@ def build_professional_word_report_v4(df, filename_base, card_choice):
 def build_professional_word_report_v5(df, filename_base, card_choice):
     doc = Document()
     
-    # تصغير الهوامش لاستغلال مساحة الورقة
+    # تصغير الهوامش
     for section in doc.sections:
         section.top_margin = Cm(0.5)
         section.bottom_margin = Cm(0.5)
@@ -131,7 +146,7 @@ def build_professional_word_report_v5(df, filename_base, card_choice):
         
     # تنظيف اسم الوكيل للعنوان
     clean_name = filename_base
-    words_to_remove = ["مستكشف", "معدل", "كشف", "منسق", "جاهز", ".xlsx", ".csv"]
+    words_to_remove = ["مستكشف", "معدل", "كشف", "منسق", "جاهز", ".xlsx", ".csv", ".docx"]
     for w in words_to_remove:
         clean_name = clean_name.replace(w, "")
     clean_name = re.sub(r'[a-zA-Z]', '', clean_name)
@@ -156,11 +171,10 @@ def build_professional_word_report_v5(df, filename_base, card_choice):
     table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
     table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
     
-    # حساب المسافات والأعمدة
+    # حساب المسافات
     max_name_len = max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15)
     dynamic_name_width = Cm(max_name_len * 0.22 + 0.5)
     
-    # حقل البصمة واسع (4 سم)
     col_widths = [Cm(0.9), dynamic_name_width, Cm(3.0), Cm(1.2), Cm(1.2), Cm(1.2), Cm(4.0)]
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
     
@@ -180,7 +194,6 @@ def build_professional_word_report_v5(df, filename_base, card_choice):
         r_trPr = table.rows[idx+1]._tr.get_or_add_trPr()
         r_trPr.append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
         
-        # حماية من الأخطاء في حال كانت القيمة فارغة
         try:
             is_eligible_zero = int(float(row.get("مستحق", 0))) == 0
         except ValueError:
@@ -198,11 +211,10 @@ def build_professional_word_report_v5(df, filename_base, card_choice):
             elif i == 3: val = row.get("الكلي", "")
             elif i == 4: val = row.get("مستحق", "")
             elif i == 5: val = row.get("محجوب", "")
-            elif i == 6: val = "" # حقل التوقيع/البصمة يترك فارغاً
+            elif i == 6: val = "" # فارغ للتوقيع والبصمة
                     
             format_cell_advanced(row_cells[i], val, size_pt=14, font_name="Calibri", color_rgb=None, align="left" if i == 1 else "center")
             
-            # تلوين المحجوب / غير المستحق بالأحمر
             if is_eligible_zero and i != 6:
                 set_cell_background(row_cells[i], HEX_ALERT_RED)
             else:
@@ -215,63 +227,66 @@ def build_professional_word_report_v5(df, filename_base, card_choice):
 # 6. واجهة المستخدم (Streamlit UI)
 # ==========================================
 st.title("📄 نظام الوكلاء - استخراج الكشوفات المطور")
-st.write("قم برفع ملف الإكسل لاختيار القالب المناسب وتصدير ملف وورد جاهز للطباعة.")
+st.write("قم برفع ملف الإكسل أو الوورد لاختيار القالب المناسب وتصدير ملف وورد جاهز للطباعة.")
 
-uploaded_file = st.file_uploader("📂 ارفع ملف الإكسل هنا", type=['xlsx', 'xls', 'csv'])
+# 🔴 التحديث هنا: إضافة صيغة docx لاستقبال ملفات الوورد
+uploaded_file = st.file_uploader("📂 ارفع الملف هنا (Excel, CSV, Word)", type=['xlsx', 'xls', 'csv', 'docx'])
 
 if uploaded_file is not None:
-    # قراءة البيانات
+    # 🔴 التحديث هنا: معالجة البيانات حسب نوع الملف المرفوع
     if uploaded_file.name.endswith('.csv'):
         df = pd.read_csv(uploaded_file)
+    elif uploaded_file.name.endswith('.docx'):
+        # استدعاء دالة قراءة الوورد
+        df = extract_data_from_word(uploaded_file)
     else:
         df = pd.read_excel(uploaded_file)
         
-    st.success("تم قراءة الملف بنجاح!")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-         used_card_type = st.selectbox("💳 اختر نوع البطاقة:", ["رقم البطاقة", "الرقم التمويني"])
-         
-    with col2:
-        # القائمة المحدثة تحتوي على النموذج الخامس
-        used_template = st.radio(
-            "🎨 اختر نموذج قالب الـ Word المطلوب:",
-            [
-                "النموذج الأول (الأصلي المطور)", 
-                "النموذج الثاني (حجم 14 وحقلين فارغين)",
-                "النموذج الثالث (خط 16، عناوين 12، 4 أشهر)",
-                "النموذج الرابع (12 سلة، العدد الكلي)",
-                "النموذج الخامس (نموذج تسليم مع حقل التوقيع/البصمة)" # <== النموذج الجديد هنا
-            ],
-            index=4, # تم جعل النموذج الخامس هو الافتراضي (يمكنك تغييره لـ 0)
-            horizontal=False
-        )
-
-    if st.button("🚀 بناء وتصدير ملف الوورد"):
-        with st.spinner('جاري معالجة البيانات وبناء مستند Word...'):
-            # تنظيف البيانات
-            df_final = extract_and_clean_data(df)
-            output_filename = uploaded_file.name.split('.')[0]
-            
-            # الشروط للتشغيل بناءً على القالب المختار
-            if used_template == "النموذج الأول (الأصلي المطور)":
-                word_output = build_professional_word_report(df_final, output_filename, used_card_type)
-            elif used_template == "النموذج الثاني (حجم 14 وحقلين فارغين)":
-                word_output = build_professional_word_report_v2(df_final, output_filename, used_card_type)
-            elif used_template == "النموذج الثالث (خط 16، عناوين 12، 4 أشهر)":
-                word_output = build_professional_word_report_v3(df_final, output_filename, used_card_type)
-            elif used_template == "النموذج الرابع (12 سلة، العدد الكلي)":
-                word_output = build_professional_word_report_v4(df_final, output_filename, used_card_type)
-            else: 
-                # استدعاء النموذج الخامس هنا
-                word_output = build_professional_word_report_v5(df_final, output_filename, used_card_type)
-                
-            st.success("✅ تم الانتهاء من بناء الملف بنجاح!")
-            
-            st.download_button(
-                label="📥 تحميل ملف الوورد الجاهز",
-                data=word_output,
-                file_name=f"كشف_{output_filename}_مطور.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    if df.empty:
+        st.error("⚠️ لم يتم العثور على بيانات قابلة للقراءة في الملف المرفوع.")
+    else:
+        st.success("✅ تم قراءة الملف بنجاح!")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+             used_card_type = st.selectbox("💳 اختر نوع البطاقة:", ["رقم البطاقة", "الرقم التمويني"])
+             
+        with col2:
+            used_template = st.radio(
+                "🎨 اختر نموذج قالب الـ Word المطلوب:",
+                [
+                    "النموذج الأول (الأصلي المطور)", 
+                    "النموذج الثاني (حجم 14 وحقلين فارغين)",
+                    "النموذج الثالث (خط 16، عناوين 12، 4 أشهر)",
+                    "النموذج الرابع (12 سلة، العدد الكلي)",
+                    "النموذج الخامس (نموذج تسليم مع حقل التوقيع/البصمة)"
+                ],
+                index=4,
+                horizontal=False
             )
+
+        if st.button("🚀 بناء وتصدير ملف الوورد"):
+            with st.spinner('جاري معالجة البيانات وبناء مستند Word...'):
+                df_final = extract_and_clean_data(df)
+                output_filename = uploaded_file.name.split('.')[0]
+                
+                if used_template == "النموذج الأول (الأصلي المطور)":
+                    word_output = build_professional_word_report(df_final, output_filename, used_card_type)
+                elif used_template == "النموذج الثاني (حجم 14 وحقلين فارغين)":
+                    word_output = build_professional_word_report_v2(df_final, output_filename, used_card_type)
+                elif used_template == "النموذج الثالث (خط 16، عناوين 12، 4 أشهر)":
+                    word_output = build_professional_word_report_v3(df_final, output_filename, used_card_type)
+                elif used_template == "النموذج الرابع (12 سلة، العدد الكلي)":
+                    word_output = build_professional_word_report_v4(df_final, output_filename, used_card_type)
+                else: 
+                    word_output = build_professional_word_report_v5(df_final, output_filename, used_card_type)
+                    
+                st.success("✅ تم الانتهاء من بناء الملف بنجاح!")
+                
+                st.download_button(
+                    label="📥 تحميل ملف الوورد الجاهز",
+                    data=word_output,
+                    file_name=f"كشف_{output_filename}_مطور.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
