@@ -22,16 +22,20 @@ st.markdown("""
 
 st.markdown("<h1 style='text-align: right;'>نظام تنسيق وتدقيق كشوفات الوكلاء المطور 📄💎</h1>", unsafe_allow_html=True)
 
-if "processing_done" not in st.session_state:
-    st.session_state.processing_done = False
-    st.session_state.df_final = None
-    st.session_state.output_filename = ""
-    st.session_state.selected_card = ""
-    st.session_state.template_choice = ""
-    st.session_state.input_format_choice = ""
-    st.session_state.reference_filename = ""
-    st.session_state.corrections_df = None
-    st.session_state.unresolved_df = None
+_default_state = {
+    "processing_done": False,
+    "df_final": None,
+    "output_filename": "",
+    "selected_card": "",
+    "template_choice": "",
+    "input_format_choice": "",
+    "reference_filename": "",
+    "corrections_df": None,
+    "unresolved_df": None,
+}
+for _key, _default_val in _default_state.items():
+    if _key not in st.session_state:
+        st.session_state[_key] = _default_val
 
 # -----------------------------------------------------------------------------
 # مساعدات التنسيق المتقدمة لملفات Word عبر الـ XML
