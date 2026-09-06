@@ -32,6 +32,7 @@ _default_state = {
     "reference_filename": "",
     "corrections_df": None,
     "unresolved_df": None,
+    "matched_count": 0,
 }
 for _key, _default_val in _default_state.items():
     if _key not in st.session_state:
@@ -294,6 +295,16 @@ def extract_ration_list_data(file_obj, card_choice):
 # محرك "قاعدة الأسماء الصحيحة" - لتصحيح الأسماء التالفة/المقلوبة اعتماداً على
 # مطابقة رقم البطاقة التموينية فقط (وليس الاسم، لأن الاسم هو الحقل المشكوك فيه)
 # -----------------------------------------------------------------------------
+def normalize_card_number(card):
+    """
+    يوحّد صيغة رقم البطاقة للمقارنة فقط (يزيل الأصفار البادئة)، لأن بعض الملفات
+    تخزّن الرقم نفسه بأصفار بادئة (مثال: 0000022) وأخرى بدونها (22) رغم أنه نفس الرقم.
+    """
+    s = str(card).strip()
+    if s.isdigit():
+        return str(int(s))
+    return s
+
 def build_name_reference_map(file_obj):
     """
     يقرأ ملف قاعدة الأسماء الصحيحة (xlsx أو docx) ويبني خريطة:
@@ -347,7 +358,7 @@ def build_name_reference_map(file_obj):
 
         for c in cells:
             if c.isdigit() and len(c) >= 5:
-                reference_map[c] = correct_name
+                reference_map[normalize_card_number(c)] = correct_name
 
     return reference_map
 
@@ -370,7 +381,7 @@ def apply_name_corrections(df, reference_map):
     corrections = []
 
     for idx, row in df.iterrows():
-        card = str(row["رقم البطاقة"]).strip()
+        card = normalize_card_number(row["رقم البطاقة"])
         if card in reference_map:
             correct_three_part = " ".join(reference_map[card].split()[:3])
             current_name = str(row["اسم رب الأسرة"]).strip()
@@ -451,14 +462,15 @@ def flag_unresolved_suspicious_names(df, reference_map):
     known_tokens = build_known_name_tokens(reference_map) if reference_map else None
     flagged = []
     for _, row in df.iterrows():
-        card = str(row["رقم البطاقة"]).strip()
+        card_display = str(row["رقم البطاقة"]).strip()
+        card = normalize_card_number(card_display)
         if card in reference_map:
             continue  # هذه عولجت بالفعل عبر المطابقة المباشرة
         name = str(row["اسم رب الأسرة"]).strip()
         is_suspicious, reasons = detect_suspicious_name(name, known_tokens)
         if is_suspicious:
             flagged.append({
-                "رقم البطاقة": card,
+                "رقم البطاقة": card_display,
                 "الاسم الحالي": name,
                 "اقتراح تنظيف سطحي (بدون تخمين)": light_auto_clean_name(name) or "—",
                 "سبب الاشتباه": "، ".join(reasons)
@@ -856,12 +868,13 @@ with col3:
     input_format_choice = st.radio(
         "🗂️ اختر طريقة قراءة الملف المرفوع:",
         [
-            "القراءة العامة (تلقائية كالمعتاد)",
-            "كشف القطع الغذائية (7 أعمدة ثابتة)"
+            "تلقائي (يفحص الأعمدة ويختار الأنسب)",
+            "فرض القراءة العامة",
+            "فرض كشف القطع الغذائية (7 أعمدة ثابتة)"
         ],
         index=0,
         horizontal=False,
-        help="اختر 'كشف القطع الغذائية' فقط عندما يكون الملف بالأعمدة السبعة: ت الأصلي، رقم البطاقة القديمة، رقم البطاقة الجديدة، اسم العائلة، الأفراد الكلية، الأفراد المستحقة، عدد المحجوبين."
+        help="الوضع التلقائي يجرّب أولاً قراءة الأعمدة السبعة الثابتة (ت الأصلي، رقم البطاقة القديمة، رقم البطاقة الجديدة، اسم العائلة، الأفراد الكلية، الأفراد المستحقة، عدد المحجوبين)، فإن لم تتطابق ترويسة الملف معها ينتقل تلقائياً للقراءة العامة. استخدم الخيارين اليدويين فقط إذا أردت إجبار طريقة معينة."
     )
 
 st.markdown("<br>", unsafe_allow_html=True)
@@ -880,27 +893,40 @@ if st.button("⚙️ تشغيل محرك التنظيم والتنسيق الم�
     if uploaded_file:
         with st.spinner('جاري ترتيب القيود أبجدياً وإعداد التنسيق الشرطي والمقاييس...'):
             try:
-                if input_format_choice == "كشف القطع الغذائية (7 أعمدة ثابتة)":
+                if input_format_choice == "فرض كشف القطع الغذائية (7 أعمدة ثابتة)":
                     df_res = extract_ration_list_data(uploaded_file, selected_card)
                     if df_res.empty:
-                        st.error("لم يتم التعرف على أعمدة كشف القطع الغذائية المتوقعة في هذا الملف. تأكد من صحة الترويسة أو جرّب 'القراءة العامة'.")
-                else:
+                        st.error("لم يتم التعرف على أعمدة كشف القطع الغذائية المتوقعة في هذا الملف. تأكد من صحة الترويسة أو جرّب 'تلقائي' / 'فرض القراءة العامة'.")
+                elif input_format_choice == "فرض القراءة العامة":
                     df_res = extract_and_clean_data(uploaded_file, selected_card)
                     if df_res.empty:
                         st.error("لم يتم العثور على بيانات جداول متوافقة.")
+                else:
+                    # الوضع التلقائي: نجرّب أولاً القارئ الخاص بالأعمدة السبعة الثابتة (يعتمد على تطابق أسماء
+                    # الأعمدة نفسها، فهو آمن الفشل - إن لم تتطابق الترويسة يرجع جدولاً فارغاً دون أي تخمين خاطئ)
+                    df_res = extract_ration_list_data(uploaded_file, selected_card)
+                    if df_res.empty:
+                        uploaded_file.seek(0)
+                        df_res = extract_and_clean_data(uploaded_file, selected_card)
+                        if df_res.empty:
+                            st.error("لم يتم العثور على بيانات جداول متوافقة بأي من طريقتي القراءة.")
 
                 if not df_res.empty:
                     corrections_df = pd.DataFrame(columns=["رقم البطاقة", "الاسم قبل التصحيح", "الاسم بعد التصحيح"])
                     unresolved_df = pd.DataFrame()
+                    matched_count = 0
                     if reference_file:
                         with st.spinner('جاري مطابقة الأسماء مع قاعدة الأسماء الصحيحة...'):
                             reference_map = build_name_reference_map(reference_file)
+                            matched_count = int(df_res["رقم البطاقة"].apply(
+                                lambda c: normalize_card_number(c) in reference_map).sum())
                             df_res, corrections_df = apply_name_corrections(df_res, reference_map)
                             unresolved_df = flag_unresolved_suspicious_names(df_res, reference_map)
 
                     st.session_state.df_final = df_res
                     st.session_state.corrections_df = corrections_df
                     st.session_state.unresolved_df = unresolved_df
+                    st.session_state.matched_count = matched_count
                     st.session_state.output_filename = uploaded_file.name.rsplit('.', 1)[0]
                     st.session_state.selected_card = selected_card
                     st.session_state.template_choice = template_choice
@@ -922,6 +948,9 @@ if st.session_state.processing_done:
 
     corrections_df = st.session_state.corrections_df
     unresolved_df = st.session_state.unresolved_df
+
+    if reference_file:
+        st.caption(f"🔎 تشخيص: تمت مطابقة رقم البطاقة لـ {st.session_state.matched_count} سجل من أصل {len(df_final)} مع قاعدة الأسماء المرفوعة.")
 
     if corrections_df is not None and not corrections_df.empty:
         st.markdown(
