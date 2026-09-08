@@ -97,7 +97,7 @@ def format_cell_advanced(cell, text, bold=False, color_rgb=None, size_pt=16, fon
         run.font.size = Pt(size_pt)
 
 # -----------------------------------------------------------------------------
-# محرك قراءة وتنظيف البيانات المطور (يدعم Word و Excel)
+# محرك قراءة وتنظيف البيانات المطور (يدعم Word و Excel) بالخوارزمية الرياضية
 # -----------------------------------------------------------------------------
 def extract_and_clean_data(file_obj, card_choice):
     raw_records = []
@@ -122,14 +122,12 @@ def extract_and_clean_data(file_obj, card_choice):
                 for cell in row:
                     if pd.isna(cell):
                         continue
-                    # إزالة الفواصل العشرية للأرقام الصحيحة القادمة من الإكسل
                     if isinstance(cell, float) and cell.is_integer():
                         cells.append(str(int(cell)))
                     else:
                         cells.append(str(cell).strip().replace('\n', ' '))
                 rows_data.append(cells)
     
-    # تطبيق نفس منطق التنظيف والاستخراج المعتاد على الأسطر
     for cells in rows_data:
         if not any(cells) or "المركز" in "".join(cells) or "الوكيل" in "".join(cells) or "اسم رب" in "".join(cells):
             continue
@@ -143,22 +141,58 @@ def extract_and_clean_data(file_obj, card_choice):
                     name_idx = i
         if name_idx == -1: continue
         
-        card_indices = [i for i, c in enumerate(cells) if c.isdigit() and len(c) >= 5]
-        if not card_indices: continue
+        # 1. استخراج أرقام البطاقات بصرامة (5 أرقام فأكثر) وعزلها عن الإحصائيات
+        card_candidates = [c for c in cells if c.isdigit() and len(c) >= 5]
+        if not card_candidates: continue
         
-        old_card_num = cells[card_indices[0]]
-        new_card_num = cells[card_indices[1]] if len(card_indices) > 1 else old_card_num
+        old_card_num = card_candidates[0]
+        new_card_num = card_candidates[1] if len(card_candidates) > 1 else old_card_num
         selected_card_num = new_card_num if card_choice == "رقم البطاقة الحديث" else old_card_num
         
-        digit_cells = [int(cells[i]) for i in range(name_idx) if cells[i].isdigit()]
-        if len(digit_cells) >= 3:
-            withheld, eligible, total = digit_cells[0], digit_cells[1], digit_cells[2]
-        elif len(digit_cells) == 2:
-            withheld, eligible, total = 0, digit_cells[0], digit_cells[1]
-        else:
-            continue
+        # 2. استخراج الأرقام الصغيرة فقط (التي تقل عن 100) لتمثيل أفراد العائلة والتسلسل
+        small_nums = [int(c) for c in cells if c.isdigit() and int(c) < 100]
         
-        # قص اللقب والإبقاء على الاسم الثلاثي فقط بصرامة
+        total, eligible, withheld = 0, 0, 0
+        found_stats = False
+        
+        # 3. الخوارزمية الرياضية: البحث عن التطابق (الكلي = مستحق + محجوب)
+        if len(small_nums) >= 3:
+            for i in range(len(small_nums) - 2):
+                a, b, c = small_nums[i], small_nums[i+1], small_nums[i+2]
+                # الترتيب المتوقع الأول (محجوب، مستحق، كلي)
+                if c == a + b:
+                    withheld, eligible, total = a, b, c
+                    found_stats = True
+                    break
+                # الترتيب المتوقع الثاني (كلي، مستحق، محجوب)
+                elif a == b + c:
+                    total, eligible, withheld = a, b, c
+                    found_stats = True
+                    break
+        
+        # الخطة البديلة الأولى: إذا كان المحجوب 0 قد نجد فقط رقمين متطابقين (كلي ومستحق)
+        if not found_stats and len(small_nums) >= 2:
+            for i in range(len(small_nums) - 1):
+                a, b = small_nums[i], small_nums[i+1]
+                if a == b:
+                    total, eligible, withheld = a, b, 0
+                    found_stats = True
+                    break
+        
+        # الخطة البديلة النهائية الصارمة (في حال نقص البيانات)
+        if not found_stats and len(small_nums) >= 2:
+            # استبعاد أول رقم غالباً لأنه التسلسل (ت)
+            candidates = small_nums[1:] if len(small_nums) >= 3 else small_nums
+            total = max(candidates)
+            candidates.remove(total)
+            eligible = max(candidates) if candidates else total
+            withheld = total - eligible
+            
+        # 4. فلتر الحماية الأخير: استحالة أن يكون المحجوب أو المستحق أكبر من الكلي
+        if withheld < 0 or withheld > total or eligible > total:
+            continue
+
+        # قص اللقب والإبقاء على الاسم الثلاثي فقط
         full_name = cells[name_idx]
         name_parts = full_name.split()
         three_part_name = " ".join(name_parts[:3])
@@ -179,7 +213,6 @@ def extract_and_clean_data(file_obj, card_choice):
 
 # -----------------------------------------------------------------------------
 # محرك قراءة إضافي مخصص لكشوفات "القطع الغذائية" ذات الأعمدة السبعة الثابتة
-# (تم تحديثه بالنسخة المطلوبة التي تتعامل مع البيانات بشكل أفضل)
 # -----------------------------------------------------------------------------
 def extract_ration_list_data(file_obj, card_choice):
     file_ext = file_obj.name.split('.')[-1].lower()
@@ -273,26 +306,15 @@ def extract_ration_list_data(file_obj, card_choice):
     return df
 
 # -----------------------------------------------------------------------------
-# محرك "قاعدة الأسماء الصحيحة" - لتصحيح الأسماء التالفة/المقلوبة اعتماداً على
-# مطابقة رقم البطاقة التموينية فقط (وليس الاسم، لأن الاسم هو الحقل المشكوك فيه)
+# محرك "قاعدة الأسماء الصحيحة" - لتصحيح الأسماء التالفة/المقلوبة
 # -----------------------------------------------------------------------------
 def normalize_card_number(card):
-    """
-    يوحّد صيغة رقم البطاقة للمقارنة فقط (يزيل الأصفار البادئة)، لأن بعض الملفات
-    تخزّن الرقم نفسه بأصفار بادئة (مثال: 0000022) وأخرى بدونها (22) رغم أنه نفس الرقم.
-    """
     s = str(card).strip()
     if s.isdigit():
         return str(int(s))
     return s
 
 def build_name_reference_map(file_obj):
-    """
-    يقرأ ملف قاعدة الأسماء الصحيحة (xlsx أو docx) ويبني خريطة:
-    رقم البطاقة -> الاسم الصحيح الكامل.
-    يلتقط كل رقم بطاقة (5 أرقام فأكثر) موجود بالصف - سواء كان قديماً أو جديداً -
-    وينسبه لنفس الاسم، لضمان المطابقة أياً كان نوع الرقم المستخدم في الملف الرئيسي.
-    """
     file_ext = file_obj.name.split('.')[-1].lower()
     rows_data = []
 
@@ -344,17 +366,11 @@ def build_name_reference_map(file_obj):
     return reference_map
 
 def normalize_name_for_compare(name):
-    """توحيد بسيط لأشكال الحروف والمسافات فقط لغرض المقارنة (لا يُستخدم كقيمة نهائية)."""
     n = re.sub(r'\s+', ' ', str(name).strip())
     n = n.replace('أ', 'ا').replace('إ', 'ا').replace('آ', 'ا').replace('ى', 'ي')
     return n
 
 def apply_name_corrections(df, reference_map):
-    """
-    يفحص كل سجل: إن كان رقم بطاقته موجوداً في قاعدة الأسماء الصحيحة والاسم مختلف عنها،
-    يستبدل حقل الاسم فقط بالاسم الصحيح من القاعدة (بقية الأعمدة تبقى كما هي دون أي مساس)،
-    ويعيد الترتيب الأبجدي وإعادة ترقيم "ت"، مع تسجيل كل استبدال في تقرير منفصل.
-    """
     if df.empty or not reference_map:
         return df, pd.DataFrame(columns=["رقم البطاقة", "الاسم قبل التصحيح", "الاسم بعد التصحيح"])
 
@@ -381,30 +397,18 @@ def apply_name_corrections(df, reference_map):
     return df, pd.DataFrame(corrections)
 
 def light_auto_clean_name(name):
-    """
-    تنظيف سطحي آمن فقط: إزالة أي رموز/أرقام/حروف غير عربية عالقة بالاسم وضغط المسافات.
-    لا يحاول إطلاقاً تخمين حروف ناقصة أو إعادة ترتيب حروف مبعثرة - فقط إزالة الشوائب الواضحة.
-    """
     if not name:
         return ""
     n = re.sub(r'[^\u0600-\u06FF\s]', ' ', str(name))
     return re.sub(r'\s+', ' ', n).strip()
 
 def build_known_name_tokens(reference_map):
-    """يبني مجموعة كل مقاطع الأسماء (الكلمات) الظاهرة في قاعدة الأسماء الصحيحة، لاستخدامها كقاموس مرجعي."""
     tokens = set()
     for name in reference_map.values():
         tokens.update(name.split())
     return tokens
 
 def detect_suspicious_name(name, known_tokens=None):
-    """
-    فحص إرشادي لاكتشاف الأسماء المشتبه بتلفها/عدم وضوحها لسجلات لا يوجد لها
-    أي مرجع في قاعدة الأسماء الصحيحة (غالباً سجلات جديدة لم تُضف للقاعدة بعد).
-    إن تم تمرير known_tokens (قاموس مقاطع الأسماء المعروفة من القاعدة)، يُضاف فحص إضافي
-    يكتشف الأحرف المخربطة التي تشكّل كلمة تبدو سليمة هيكلياً لكنها غير موجودة في القاموس.
-    يُرجع: (هل الاسم مشتبه به، قائمة أسباب الاشتباه)
-    """
     reasons = []
     original = str(name).strip()
 
@@ -430,23 +434,18 @@ def detect_suspicious_name(name, known_tokens=None):
     if known_tokens:
         unknown_words = [w for w in words if len(w) > 1 and w not in known_tokens]
         if unknown_words:
-            reasons.append(f"يحتوي على مقطع/مقاطع غير موجودة ضمن قائمة الأسماء المعروفة بالقاعدة: {', '.join(unknown_words)} (قد يكون محرَّفاً بتبديل حروف)")
+            reasons.append(f"يحتوي على مقطع/مقاطع غير موجودة ضمن قائمة الأسماء المعروفة بالقاعدة: {', '.join(unknown_words)}")
 
     return (len(reasons) > 0), reasons
 
 def flag_unresolved_suspicious_names(df, reference_map):
-    """
-    يفحص السجلات التي لم يُعثر لرقم بطاقتها على أي مقابل في قاعدة الأسماء الصحيحة،
-    ويكتشف من بينها ما يبدو اسمه تالفاً أو غير مفهوم، مع اقتراح تنظيف سطحي (بدون تخمين)،
-    ويعيدها كتقرير مراجعة يدوية منفصل - هذه السجلات لا يمكن تصحيحها تلقائياً لعدم وجود مرجع لها.
-    """
     known_tokens = build_known_name_tokens(reference_map) if reference_map else None
     flagged = []
     for _, row in df.iterrows():
         card_display = str(row["رقم البطاقة"]).strip()
         card = normalize_card_number(card_display)
         if card in reference_map:
-            continue  # هذه عولجت بالفعل عبر المطابقة المباشرة
+            continue
         name = str(row["اسم رب الأسرة"]).strip()
         is_suspicious, reasons = detect_suspicious_name(name, known_tokens)
         if is_suspicious:
@@ -459,7 +458,6 @@ def flag_unresolved_suspicious_names(df, reference_map):
     return pd.DataFrame(flagged)
 
 def build_corrections_report_excel(corrections_df, unresolved_df=None):
-    """يبني ملف Excel بتقريرين: الأسماء المصحَّحة تلقائياً من القاعدة، والأسماء المشتبه بها التي تحتاج مراجعة يدوية."""
     buffer = BytesIO()
     with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
         if corrections_df is None or corrections_df.empty:
@@ -477,7 +475,7 @@ def build_corrections_report_excel(corrections_df, unresolved_df=None):
     return buffer
 
 # -----------------------------------------------------------------------------
-# محرك بناء تقرير Word - النموذج الأول (الأصلي)
+# محرك بناء تقرير Word - النماذج الأربعة
 # -----------------------------------------------------------------------------
 def build_professional_word_report(df, filename_base, card_choice):
     doc = Document()
@@ -545,9 +543,6 @@ def build_professional_word_report(df, filename_base, card_choice):
                 elif i==5: set_cell_background(row_cells[i], "FADBD8")
     return save_doc_buffer(doc, df)
 
-# -----------------------------------------------------------------------------
-# محرك بناء تقرير Word - النموذج الثاني
-# -----------------------------------------------------------------------------
 def build_professional_word_report_v2(df, filename_base, card_choice):
     doc = Document()
     for section in doc.sections:
@@ -598,9 +593,6 @@ def build_professional_word_report_v2(df, filename_base, card_choice):
             if i==6: set_cell_background(row_cells[i], "E5E7E9")
     return save_doc_buffer(doc, df)
 
-# -----------------------------------------------------------------------------
-# محرك بناء تقرير Word - النموذج الثالث (عناوين 12، تفاصيل 16، 4 أشهر)
-# -----------------------------------------------------------------------------
 def build_professional_word_report_v3(df, filename_base, card_choice):
     doc = Document()
     for section in doc.sections:
@@ -654,9 +646,6 @@ def build_professional_word_report_v3(df, filename_base, card_choice):
             if i == 5: set_cell_background(row_cells[i], "FCF3CF")
     return save_doc_buffer(doc, df)
 
-# -----------------------------------------------------------------------------
-# محرك بناء تقرير Word - النموذج الرابع (12 سلة، التعديل: العدد الكلي للأفراد)
-# -----------------------------------------------------------------------------
 def build_professional_word_report_v4(df, filename_base, card_choice):
     doc = Document()
     
@@ -681,7 +670,6 @@ def build_professional_word_report_v4(df, filename_base, card_choice):
     title_run.font.size = Pt(14)
     title_run.bold = True
     
-    # تم تغيير عنوان العمود الرابع إلى "العدد الكلي" بدلاً من المستحق
     headers = ["ت", card_choice, "اسم المواطن", "العدد الكلي"] + [f"سلة {i}" for i in range(1, 13)]
     
     table = doc.add_table(rows=1, cols=16)
@@ -699,13 +687,12 @@ def build_professional_word_report_v4(df, filename_base, card_choice):
     max_name_len = max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15)
     dynamic_name_width = Cm(max_name_len * 0.22 + 0.5)
     
-    # توزيع المقاسات للنموذج الرابع (12 سلة تملأ الورقة بأحجام متساوية)
     col_widths = [
-        Cm(0.9),              # ت
-        Cm(2.5),              # رقم البطاقة
-        dynamic_name_width,   # اسم المواطن
-        Cm(0.9)               # العدد الكلي
-    ] + [Cm(1.05)] * 12       # 12 سلة بأحجام متساوية 
+        Cm(0.9),              
+        Cm(2.5),              
+        dynamic_name_width,   
+        Cm(0.9)               
+    ] + [Cm(1.05)] * 12       
     
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
     
@@ -713,7 +700,6 @@ def build_professional_word_report_v4(df, filename_base, card_choice):
     for i, title in enumerate(headers):
         hdr_cells[i].width = col_widths[i]
         
-        # جعل النصوص عمودية للأعمدة الضيقة من العدد الكلي إلى آخر سلة لتوفير مساحة
         if i >= 3:
             set_cell_vertical_text(hdr_cells[i])
         
@@ -738,19 +724,18 @@ def build_professional_word_report_v4(df, filename_base, card_choice):
             
             val = ""
             cell_align = "center"
-            font_size = 14  # حجم خط 14 ليتناسب مع 16 عمود
+            font_size = 14  
             
             if i == 0: val = row["ت"]
             elif i == 1: val = row["رقم البطاقة"]
             elif i == 2: 
                 val = row["اسم رب الأسرة"]
                 cell_align = "left" 
-            elif i == 3: val = row["الكلي"] # تم التعديل لعرض الكلي بدلاً من مستحق
-            elif i >= 4: val = "" # حقول السلات الـ 12 تبقى فارغة
+            elif i == 3: val = row["الكلي"] 
+            elif i >= 4: val = "" 
                     
             format_cell_advanced(row_cells[i], val, size_pt=font_size, font_name="Calibri", color_rgb=None, align=cell_align)
             
-            # التنسيق اللوني
             if is_eligible_zero:
                 set_cell_background(row_cells[i], HEX_ALERT_RED)
             else:
@@ -759,7 +744,6 @@ def build_professional_word_report_v4(df, filename_base, card_choice):
 
     return save_doc_buffer(doc, df)
 
-# دالة لحفظ وعرض الإحصائيات المشتركة تحت الجدول
 def save_doc_buffer(doc, df):
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
     total_all = df["الكلي"].astype(int).sum()
@@ -782,7 +766,6 @@ def save_doc_buffer(doc, df):
     stats_text_run.bold = True
     stats_text_run.font.color.rgb = COLOR_NAVY_BLUE
 
-    # الترقيم السفلي للصفحات
     footer = doc.sections[0].footer
     if len(footer.paragraphs) == 0:
         footer_p = footer.add_paragraph()
@@ -808,7 +791,6 @@ def save_doc_buffer(doc, df):
 # واجهة استخدام التطبيق (Streamlit Interface)
 # -----------------------------------------------------------------------------
 st.markdown("<h3 style='text-align: right;'>📂 رفع الكشف المراد تدقيقه وتنسيقه للمطبعة</h3>", unsafe_allow_html=True)
-# تعديل شريط الرفع ليقبل ملفات إكسل بصيغة xlsx إلى جانب الـ docx
 uploaded_file = st.file_uploader("ارفع كشف الوكلاء", type=['docx', 'xlsx'], key="doc_input_v6", label_visibility="collapsed")
 
 st.markdown("<h4 style='text-align: right;'>📚 قاعدة الأسماء الصحيحة (اختياري) - لتصحيح الأسماء التالفة أو المقلوبة</h4>", unsafe_allow_html=True)
@@ -855,7 +837,7 @@ with col3:
         ],
         index=0,
         horizontal=False,
-        help="الوضع التلقائي يجرّب أولاً قراءة الأعمدة السبعة الثابتة (ت الأصلي، رقم البطاقة القديمة، رقم البطاقة الجديدة، اسم العائلة، الأفراد الكلية، الأفراد المستحقة، عدد المحجوبين)، فإن لم تتطابق ترويسة الملف معها ينتقل تلقائياً للقراءة العامة. استخدم الخيارين اليدويين فقط إذا أردت إجبار طريقة معينة."
+        help="الوضع التلقائي يجرّب أولاً قراءة الأعمدة السبعة الثابتة، فإن لم تتطابق ترويسة الملف معها ينتقل تلقائياً للقراءة العامة."
     )
 
 st.markdown("<br>", unsafe_allow_html=True)
@@ -877,14 +859,12 @@ if st.button("⚙️ تشغيل محرك التنظيم والتنسيق الم�
                 if input_format_choice == "فرض كشف القطع الغذائية (7 أعمدة ثابتة)":
                     df_res = extract_ration_list_data(uploaded_file, selected_card)
                     if df_res.empty:
-                        st.error("لم يتم التعرف على أعمدة كشف القطع الغذائية المتوقعة في هذا الملف. تأكد من صحة الترويسة أو جرّب 'تلقائي' / 'فرض القراءة العامة'.")
+                        st.error("لم يتم التعرف على أعمدة كشف القطع الغذائية المتوقعة في هذا الملف.")
                 elif input_format_choice == "فرض القراءة العامة":
                     df_res = extract_and_clean_data(uploaded_file, selected_card)
                     if df_res.empty:
                         st.error("لم يتم العثور على بيانات جداول متوافقة.")
                 else:
-                    # الوضع التلقائي: نجرّب أولاً القارئ الخاص بالأعمدة السبعة الثابتة (يعتمد على تطابق أسماء
-                    # الأعمدة نفسها، فهو آمن الفشل - إن لم تتطابق الترويسة يرجع جدولاً فارغاً دون أي تخمين خاطئ)
                     df_res = extract_ration_list_data(uploaded_file, selected_card)
                     if df_res.empty:
                         uploaded_file.seek(0)
@@ -944,7 +924,7 @@ if st.session_state.processing_done:
 
     if unresolved_df is not None and not unresolved_df.empty:
         st.markdown(
-            f"<div class='report-box' style='border-right-color:#CB4335;'>⚠️ يوجد <b>{len(unresolved_df)}</b> اسم مشتبه بتلفه لسجلات <b>غير موجودة في القاعدة</b> (على الأغلب مضافة حديثاً)، ولا يمكن تصحيحها تلقائياً لعدم وجود مرجع لها - يُرجى مراجعتها يدوياً ثم إضافتها للقاعدة مستقبلاً.</div>",
+            f"<div class='report-box' style='border-right-color:#CB4335;'>⚠️ يوجد <b>{len(unresolved_df)}</b> اسم مشتبه بتلفه لسجلات <b>غير موجودة في القاعدة</b>، يُرجى مراجعتها يدوياً.</div>",
             unsafe_allow_html=True
         )
         st.dataframe(unresolved_df, use_container_width=True)
