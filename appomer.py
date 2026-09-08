@@ -87,7 +87,7 @@ def format_cell_advanced(cell, text, bold=False, color_rgb=None, size_pt=16, fon
         run.font.size = Pt(size_pt)
 
 # -----------------------------------------------------------------------------
-# محرك قراءة وتنظيف البيانات المطور (يدعم Word و Excel)
+# محرك قراءة وتنظيف البيانات
 # -----------------------------------------------------------------------------
 def extract_and_clean_data(file_obj, card_choice):
     raw_records = []
@@ -164,7 +164,7 @@ def extract_and_clean_data(file_obj, card_choice):
     return df
 
 # -----------------------------------------------------------------------------
-# محرك قراءة إضافي مخصص لكشوفات "القطع الغذائية" 
+# محرك قراءة إضافي مخصص لكشوفات "القطع الغذائية" (الدالة التي تم إكمالها)
 # -----------------------------------------------------------------------------
 def extract_ration_list_data(file_obj, card_choice):
     file_ext = file_obj.name.split('.')[-1].lower()
@@ -223,11 +223,9 @@ def extract_ration_list_data(file_obj, card_choice):
         if idx_name >= len(cells):
             continue
             
-        # تجاوز صف الإجماليات/المجاميع الختامية إن وُجد في نهاية الجدول
         if any("الإجمالي" in str(c) for c in cells) or any("المجموع" in str(c) for c in cells):
             continue
             
-        # استخراج وتصحيح الأسماء والأرقام
         full_name = cells[idx_name]
         name_parts = full_name.split()
         three_part_name = " ".join(name_parts[:3])
@@ -270,13 +268,11 @@ def generate_word_report(df, agent_name="كشف الوكيل"):
     table.style = 'Table Grid'
     set_table_borders(table)
     
-    # رأس الجدول
     hdr_cells = table.rows[0].cells
     for i, col_name in enumerate(df.columns):
         set_cell_background(hdr_cells[i], "2A4B7C")
         format_cell_advanced(hdr_cells[i], col_name, bold=True, color_rgb=RGBColor(255, 255, 255))
         
-    # تعبئة البيانات
     for _, row in df.iterrows():
         row_cells = table.add_row().cells
         for i, val in enumerate(row):
@@ -298,7 +294,6 @@ card_choice = st.radio("اختر نوع رقم البطاقة المراد اع�
 if uploaded_file is not None:
     if st.button("🚀 معالجة البيانات وتحليلها"):
         with st.spinner("جاري تحليل ومعالجة البيانات..."):
-            # محاولة المعالجة باستخدام المحرك المخصص أولاً، إن فشل نستخدم المحرك العام
             df_result = extract_ration_list_data(uploaded_file, card_choice)
             if df_result.empty:
                 df_result = extract_and_clean_data(uploaded_file, card_choice)
@@ -307,14 +302,13 @@ if uploaded_file is not None:
                 st.session_state.df_final = df_result
                 st.session_state.processing_done = True
                 
-                # عرض التحليل بشكل مبسط في الواجهة
                 st.success("✅ تمت المعالجة بنجاح!")
                 st.markdown(f"**إجمالي العوائل:** {len(df_result)} | **إجمالي الأفراد:** {df_result['الكلي'].sum()} | **الأفراد المستحقون:** {df_result['مستحق'].sum()}")
                 st.dataframe(df_result.head(10))
             else:
                 st.error("⚠️ لم يتم العثور على بيانات قابلة للاستخراج، تأكد من تنسيق الملف.")
 
-# زر التحميل المباشر (يظهر فقط بعد اكتمال المعالجة)
+# زر التحميل المباشر الذي طلبته
 if st.session_state.processing_done and st.session_state.df_final is not None:
     st.markdown("### 📥 تحميل الملف النهائي")
     word_buffer = generate_word_report(st.session_state.df_final)
