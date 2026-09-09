@@ -42,6 +42,7 @@ if "processing_done" not in st.session_state:
     st.session_state.selected_card = ""
     st.session_state.template_choice = ""
     st.session_state.name_choice = ""
+    st.session_state.sort_choice = ""
 
 # -----------------------------------------------------------------------------
 # مساعدات التنسيق المتقدمة لملفات Word
@@ -266,7 +267,7 @@ def _extract_records_by_headers(rows_data, card_choice, name_length_choice):
 # -----------------------------------------------------------------------------
 # محرك قراءة وتنظيف البيانات المطور
 # -----------------------------------------------------------------------------
-def extract_and_clean_data(file_obj, card_choice, name_length_choice):
+def extract_and_clean_data(file_obj, card_choice, name_length_choice, sort_alphabetically=True):
     raw_records = []
     rows_data = []
 
@@ -298,7 +299,8 @@ def extract_and_clean_data(file_obj, card_choice, name_length_choice):
     if header_records is not None:
         df = pd.DataFrame(header_records)
         if not df.empty:
-            df = df.sort_values(by="اسم رب الأسرة").reset_index(drop=True)
+            if sort_alphabetically:
+                df = df.sort_values(by="اسم رب الأسرة").reset_index(drop=True)
             df.insert(0, "ت", df.index + 1)
         return df
 
@@ -357,7 +359,8 @@ def extract_and_clean_data(file_obj, card_choice, name_length_choice):
         
     df = pd.DataFrame(raw_records)
     if not df.empty:
-        df = df.sort_values(by="اسم رب الأسرة").reset_index(drop=True)
+        if sort_alphabetically:
+            df = df.sort_values(by="اسم رب الأسرة").reset_index(drop=True)
         df.insert(0, "ت", df.index + 1)
     return df
 
@@ -1107,40 +1110,52 @@ with col3:
         horizontal=False
     )
 
+sort_choice = st.radio(
+    "🔤 ترتيب بيانات الجدول:",
+    ["ترتيب أبجدي بحسب الاسم", "الحفاظ على ترتيب الملف الأصلي (بدون ترتيب أبجدي)"],
+    index=0,
+    horizontal=True
+)
+sort_alphabetically = (sort_choice == "ترتيب أبجدي بحسب الاسم")
+
 st.markdown("<br>", unsafe_allow_html=True)
 
 if uploaded_files:
     current_filename = " و ".join([f.name.rsplit('.', 1)[0] for f in uploaded_files])
-    if (st.session_state.output_filename != current_filename or 
-        st.session_state.selected_card != selected_card or 
+    if (st.session_state.output_filename != current_filename or
+        st.session_state.selected_card != selected_card or
         st.session_state.template_choice != template_choice or
-        st.session_state.name_choice != name_length_choice):
+        st.session_state.name_choice != name_length_choice or
+        st.session_state.sort_choice != sort_choice):
         st.session_state.processing_done = False
 
 if st.button("⚙️ تشغيل محرك التنظيم والتنسيق المتقدم الكلي"):
     if uploaded_files:
-        with st.spinner('جاري معالجة وترتيب القيود أبجدياً وإعداد التنسيق الشرطي والمقاييس...'):
+        spinner_msg = 'جاري معالجة وترتيب القيود أبجدياً وإعداد التنسيق الشرطي والمقاييس...' if sort_alphabetically else 'جاري معالجة القيود (بترتيب الملف الأصلي) وإعداد التنسيق الشرطي والمقاييس...'
+        with st.spinner(spinner_msg):
             try:
                 all_extracted_dfs = []
                 for f in uploaded_files:
-                    df_res = extract_and_clean_data(f, selected_card, name_length_choice)
+                    df_res = extract_and_clean_data(f, selected_card, name_length_choice, sort_alphabetically)
                     if not df_res.empty:
                         all_extracted_dfs.append(df_res)
-                
+
                 if all_extracted_dfs:
                     merged_df = pd.concat(all_extracted_dfs, ignore_index=True)
-                    merged_df = merged_df.sort_values(by="اسم رب الأسرة").reset_index(drop=True)
+                    if sort_alphabetically:
+                        merged_df = merged_df.sort_values(by="اسم رب الأسرة").reset_index(drop=True)
                     merged_df["ت"] = merged_df.index + 1
-                    
+
                     st.session_state.df_final = merged_df
                     if len(uploaded_files) > 1:
                         st.session_state.output_filename = "مدمج_" + "_".join([f.name.rsplit('.', 1)[0][:10] for f in uploaded_files])
                     else:
                         st.session_state.output_filename = uploaded_files[0].name.rsplit('.', 1)[0]
-                        
+
                     st.session_state.selected_card = selected_card
                     st.session_state.template_choice = template_choice
                     st.session_state.name_choice = name_length_choice
+                    st.session_state.sort_choice = sort_choice
                     st.session_state.processing_done = True
                 else:
                     st.error("لم يتم العثور على بيانات جداول متوافقة في الملفات المرفوعة.")
@@ -1154,8 +1169,8 @@ if st.session_state.processing_done:
     output_filename = st.session_state.output_filename
     used_card_type = st.session_state.selected_card
     used_template = st.session_state.template_choice
-    
-    st.success(f"✅ تم الدمج والتنظيم الأبجدي بنجاح لـ ({len(df_final)}) قيد اسم.")
+    order_note = "أبجدياً" if st.session_state.sort_choice == "ترتيب أبجدي بحسب الاسم" else "بترتيب الملف الأصلي"
+    st.success(f"✅ تم الدمج والتنظيم بنجاح ({order_note}) لـ ({len(df_final)}) قيد اسم.")
     
     with st.spinner('جاري صياغة وهيكلة مستندات Word و PDF المكتملة...'):
         if used_template == "النموذج الأول (الأصلي المطور)":
