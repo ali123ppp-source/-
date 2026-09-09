@@ -134,21 +134,104 @@ def setup_document_layout(doc, filename_base, is_a3=False):
             run.bold = True
 
 # -----------------------------------------------------------------------------
+# محرك استخراج البيانات اعتماداً على عناوين الأعمدة الفعلية (تقارير منسّقة)
+# -----------------------------------------------------------------------------
+def _normalize_header_cell(cell):
+    return str(cell).replace(" ", "").replace("أ", "ا").replace("إ", "ا")
+
+def _locate_header_row(rows_data):
+    idx_map = {"ت": -1, "اسم": -1, "كلي": -1, "مستحق": -1, "محجوب": -1, "بطاقة_قديم": -1, "بطاقة_حديث": -1}
+    for i, row in enumerate(rows_data):
+        row_joined = "".join(row).replace(" ", "")
+        if "اسم" in row_joined and ("كلي" in row_joined or "مستحق" in row_joined or "بطاق" in row_joined or "تموين" in row_joined):
+            for j, cell in enumerate(row):
+                c = _normalize_header_cell(cell)
+                if c in ["ت", "تسلسل", "التسلسل", "م"]:
+                    idx_map["ت"] = j
+                elif "اسم" in c:
+                    idx_map["اسم"] = j
+                elif "كلي" in c or "اجمالي" in c:
+                    idx_map["كلي"] = j
+                elif "مستحق" in c:
+                    idx_map["مستحق"] = j
+                elif "محجوب" in c:
+                    idx_map["محجوب"] = j
+                elif "بطاق" in c or "تموين" in c or "رقم" in c:
+                    if "حديث" in c or "جديد" in c:
+                        idx_map["بطاقة_حديث"] = j
+                    elif "قديم" in c or "سابق" in c:
+                        idx_map["بطاقة_قديم"] = j
+                    elif idx_map["بطاقة_قديم"] == -1:
+                        idx_map["بطاقة_قديم"] = j
+            return i, idx_map
+    return -1, idx_map
+
+def _extract_records_by_headers(rows_data, card_choice, name_length_choice):
+    header_idx, idx_map = _locate_header_row(rows_data)
+    required = ["اسم", "كلي", "مستحق", "محجوب"]
+    if header_idx == -1 or any(idx_map[k] == -1 for k in required):
+        return None
+
+    take = 4 if name_length_choice == "الاسم الرباعي (إن وجد)" else 3
+    records = []
+    for i in range(header_idx + 1, len(rows_data)):
+        row = rows_data[i]
+        row_joined = "".join(row)
+        if not row_joined or "المجموع" in row_joined or "الاجمالي" in row_joined or "الوكيل" in row_joined:
+            continue
+
+        def get_val(key):
+            idx = idx_map[key]
+            return row[idx] if 0 <= idx < len(row) else ""
+
+        def get_num(key):
+            digits = ''.join(filter(str.isdigit, get_val(key)))
+            return int(digits) if digits else 0
+
+        name_val = get_val("اسم")
+        if not name_val or len(name_val) < 3:
+            continue
+
+        final_name = " ".join(name_val.split()[:take])
+        old_card = ''.join(filter(str.isdigit, get_val("بطاقة_قديم")))
+        new_card = ''.join(filter(str.isdigit, get_val("بطاقة_حديث")))
+
+        if card_choice == "رقم البطاقة الحديث":
+            selected_card_num = new_card or old_card
+        elif card_choice == "القديم والحديث":
+            if old_card and new_card and old_card != new_card:
+                selected_card_num = f"{old_card} / {new_card}"
+            else:
+                selected_card_num = old_card or new_card
+        else:
+            selected_card_num = old_card or new_card
+
+        records.append({
+            "اسم رب الأسرة": final_name,
+            "رقم البطاقة": selected_card_num,
+            "الكلي": get_num("كلي"),
+            "محجوب": get_num("محجوب"),
+            "مستحق": get_num("مستحق"),
+        })
+
+    return records
+
+# -----------------------------------------------------------------------------
 # محرك قراءة وتنظيف البيانات المطور
 # -----------------------------------------------------------------------------
 def extract_and_clean_data(file_obj, card_choice, name_length_choice):
     raw_records = []
     rows_data = []
-    
+
     file_ext = file_obj.name.split('.')[-1].lower()
-    
+
     if file_ext == 'docx':
         doc = Document(file_obj)
         for table in doc.tables:
             for row in table.rows:
                 cells = [cell.text.strip().replace('\n', ' ') for cell in row.cells]
                 rows_data.append(cells)
-                
+
     elif file_ext == 'xlsx':
         xls = pd.ExcelFile(file_obj)
         for sheet_name in xls.sheet_names:
@@ -163,7 +246,15 @@ def extract_and_clean_data(file_obj, card_choice, name_length_choice):
                     else:
                         cells.append(str(cell).strip().replace('\n', ' '))
                 rows_data.append(cells)
-    
+
+    header_records = _extract_records_by_headers(rows_data, card_choice, name_length_choice)
+    if header_records is not None:
+        df = pd.DataFrame(header_records)
+        if not df.empty:
+            df = df.sort_values(by="اسم رب الأسرة").reset_index(drop=True)
+            df.insert(0, "ت", df.index + 1)
+        return df
+
     for cells in rows_data:
         if not any(cells) or "المركز" in "".join(cells) or "الوكيل" in "".join(cells) or "اسم رب" in "".join(cells):
             continue
