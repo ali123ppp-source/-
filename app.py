@@ -957,7 +957,12 @@ def build_pdf_report(df, filename_base, card_choice, template_choice):
     </html>
     """
     
-    if PDFKIT_AVAILABLE:
+    if WEASYPRINT_AVAILABLE:
+        pdf_buffer = BytesIO()
+        HTML(string=html_doc).write_pdf(pdf_buffer)
+        pdf_buffer.seek(0)
+        return pdf_buffer
+    elif PDFKIT_AVAILABLE:
         options = {
             'page-size': page_size,
             'orientation': 'Landscape' if page_orientation == 'landscape' else 'Portrait',
@@ -972,13 +977,8 @@ def build_pdf_report(df, filename_base, card_choice, template_choice):
         pdf_bytes = pdfkit.from_string(html_doc, False, options=options)
         pdf_buffer = BytesIO(pdf_bytes)
         return pdf_buffer
-    elif WEASYPRINT_AVAILABLE:
-        pdf_buffer = BytesIO()
-        HTML(string=html_doc).write_pdf(pdf_buffer)
-        pdf_buffer.seek(0)
-        return pdf_buffer
     else:
-        raise Exception("لا توجد مكتبة PDF مثبتة (pdfkit أو weasyprint).")
+        raise Exception("لا توجد مكتبة PDF مثبتة (weasyprint أو pdfkit).")
 
 # -----------------------------------------------------------------------------
 # واجهة استخدام التطبيق (Streamlit Interface)
