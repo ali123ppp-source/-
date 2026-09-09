@@ -28,7 +28,6 @@ _default_state = {
     "output_filename": "",
     "selected_card": "",
     "template_choice": "",
-    "input_format_choice": "",
     "reference_filename": "",
     "corrections_df": None,
     "unresolved_df": None,
@@ -39,7 +38,7 @@ for _key, _default_val in _default_state.items():
         st.session_state[_key] = _default_val
 
 # -----------------------------------------------------------------------------
-# مساعدات التنسيق المتقدمة لملفات Word عبر الـ XML
+# مساعدات التنسيق المتقدمة لملفات Word
 # -----------------------------------------------------------------------------
 def set_table_borders(table, color_hex="2A4B7C"):
     tblPr = table._tbl.tblPr
@@ -97,21 +96,19 @@ def format_cell_advanced(cell, text, bold=False, color_rgb=None, size_pt=16, fon
         run.font.size = Pt(size_pt)
 
 # -----------------------------------------------------------------------------
-# محرك قراءة وتنظيف البيانات المطور (يدعم Word و Excel)
+# محرك قراءة البيانات الجديد (يعتمد على العناوين فقط لجميع الحقول)
 # -----------------------------------------------------------------------------
-def extract_and_clean_data(file_obj, card_choice):
-    raw_records = []
-    rows_data = []
-    
+def extract_data_by_headers(file_obj, card_choice):
     file_ext = file_obj.name.split('.')[-1].lower()
-    
+    rows_data = []
+
     if file_ext == 'docx':
         doc = Document(file_obj)
         for table in doc.tables:
             for row in table.rows:
                 cells = [cell.text.strip().replace('\n', ' ') for cell in row.cells]
-                rows_data.append(cells)
-                
+                if any(cells):
+                    rows_data.append(cells)
     elif file_ext == 'xlsx':
         xls = pd.ExcelFile(file_obj)
         for sheet_name in xls.sheet_names:
@@ -120,201 +117,98 @@ def extract_and_clean_data(file_obj, card_choice):
                 cells = []
                 for cell in row:
                     if pd.isna(cell):
-                        continue
-                    if isinstance(cell, float) and cell.is_integer():
+                        cells.append("")
+                    elif isinstance(cell, float) and cell.is_integer():
                         cells.append(str(int(cell)))
                     else:
                         cells.append(str(cell).strip().replace('\n', ' '))
-                rows_data.append(cells)
-    
-    for cells in rows_data:
-        if not any(cells) or "المركز" in "".join(cells) or "الوكيل" in "".join(cells) or "اسم رب" in "".join(cells):
-            continue
-        
-        name_idx = -1
-        max_len = 0
-        for i, c in enumerate(cells):
-            if any('\u0600' <= char <= '\u06FF' for char in c) and not any(char.isdigit() for char in c):
-                if len(c) > max_len:
-                    max_len = len(c)
-                    name_idx = i
-        if name_idx == -1: continue
-        
-        # 1. استخراج أرقام البطاقات (5 أرقام فأكثر)
-        card_candidates = [c for c in cells if c.isdigit() and len(c) >= 5]
-        if not card_candidates: continue
-        
-        old_card_num = card_candidates[0]
-        new_card_num = card_candidates[1] if len(card_candidates) > 1 else old_card_num
-        selected_card_num = new_card_num if card_choice == "رقم البطاقة الحديث" else old_card_num
-        
-        # 2. استخراج الأرقام الصغيرة
-        small_nums = [int(c) for c in cells if c.isdigit() and int(c) < 100]
-        
-        total, eligible, withheld = 0, 0, 0
-        found_stats = False
-        
-        # 3. الخوارزمية الرياضية: استخدام المعادلة للفحص فقط، وسحب الأرقام كما هي من الملف تماماً
-        if len(small_nums) >= 3:
-            for i in range(len(small_nums) - 2):
-                a, b, c = small_nums[i], small_nums[i+1], small_nums[i+2]
-                
-                # الترتيب الأول: المحجوب ثم المستحق ثم الكلي
-                if c == (a + b):
-                    withheld = a
-                    eligible = b
-                    total = c  # أخذ الرقم الكلي كما هو من الملف وليس ناتجاً حسابياً
-                    found_stats = True
-                    break
-                # الترتيب الثاني: الكلي ثم المستحق ثم المحجوب
-                elif a == (b + c):
-                    total = a  # أخذ الرقم الكلي كما هو من الملف
-                    eligible = b
-                    withheld = c
-                    found_stats = True
-                    break
-        
-        # الخطة البديلة الأولى: إذا كان المحجوب 0 قد نجد فقط رقمين متطابقين في الملف (كلي ومستحق)
-        if not found_stats and len(small_nums) >= 2:
-            for i in range(len(small_nums) - 1):
-                a, b = small_nums[i], small_nums[i+1]
-                if a == b:
-                    total = a
-                    eligible = b
-                    withheld = 0
-                    found_stats = True
-                    break
-        
-        # الخطة البديلة النهائية الصارمة (سحب الأرقام كما هي دون أي عمليات حسابية استنتاجية)
-        if not found_stats and len(small_nums) >= 3:
-            candidates = small_nums[-3:]
-            total = max(candidates) # الكلي هو الرقم الأكبر الموجود بالملف
-            candidates.remove(total)
-            eligible = max(candidates) # المستحق هو الأكبر بعد الكلي
-            candidates.remove(eligible)
-            withheld = candidates[0] # المحجوب هو ما تبقى
-            found_stats = True
-        elif not found_stats and len(small_nums) == 2:
-            total = max(small_nums)
-            eligible = min(small_nums)
-            withheld = 0
-            found_stats = True
-            
-        # 4. فلتر الحماية الأخير: استحالة أن يكون المحجوب أو المستحق أكبر من الكلي
-        if withheld < 0 or withheld > total or eligible > total:
-            continue
+                if any(cells):
+                    rows_data.append(cells)
 
-        # قص اللقب والإبقاء على الاسم الثلاثي فقط
-        full_name = cells[name_idx]
-        name_parts = full_name.split()
-        three_part_name = " ".join(name_parts[:3])
+    if not rows_data:
+        return pd.DataFrame()
+
+    header_idx = -1
+    idx_map = {"ت": -1, "اسم": -1, "بطاقة": -1, "كلي": -1, "مستحق": -1, "محجوب": -1}
+    
+    for i, row in enumerate(rows_data):
+        row_joined = "".join(row).replace(" ", "")
+        if "اسم" in row_joined and ("كلي" in row_joined or "مستحق" in row_joined or "بطاق" in row_joined or "تموين" in row_joined):
+            header_idx = i
+            for j, cell in enumerate(row):
+                c = cell.replace(" ", "").replace("أ", "ا").replace("إ", "ا")
+                if c in ["ت", "تسلسل", "التسلسل", "م"]: 
+                    idx_map["ت"] = j
+                elif "اسم" in c: 
+                    idx_map["اسم"] = j
+                elif "كلي" in c or "اجمالي" in c: 
+                    idx_map["كلي"] = j
+                elif "مستحق" in c: 
+                    idx_map["مستحق"] = j
+                elif "محجوب" in c: 
+                    idx_map["محجوب"] = j
+                elif "بطاق" in c or "تموين" in c or "رقم" in c: 
+                    if "حديث" in c or "جديد" in c:
+                        if "حديث" in card_choice: idx_map["بطاقة"] = j
+                        elif idx_map["بطاقة"] == -1: idx_map["بطاقة"] = j
+                    elif "قديم" in c or "سابق" in c:
+                        if "قديم" in card_choice: idx_map["بطاقة"] = j
+                        elif idx_map["بطاقة"] == -1: idx_map["بطاقة"] = j
+                    else:
+                        if idx_map["بطاقة"] == -1 and ("بطاق" in c or "تموين" in c): 
+                            idx_map["بطاقة"] = j
+            break
+
+    if header_idx == -1 or idx_map["اسم"] == -1:
+        return pd.DataFrame()
+
+    raw_records = []
+    for i in range(header_idx + 1, len(rows_data)):
+        row = rows_data[i]
+        row_joined = "".join(row)
+        
+        if not row_joined or "المجموع" in row_joined or "الاجمالي" in row_joined or "الوكيل" in row_joined:
+            continue
             
+        def get_val(col_name):
+            idx = idx_map[col_name]
+            return row[idx] if 0 <= idx < len(row) else ""
+        
+        name_val = get_val("اسم")
+        if not name_val or len(name_val) < 3:
+            continue 
+            
+        name_parts = name_val.split()
+        three_part_name = " ".join(name_parts[:3])
+        
+        card_val = get_val("بطاقة")
+        card_digits = ''.join(filter(str.isdigit, card_val))
+        
+        def get_num(col_name):
+            val = get_val(col_name)
+            digits = ''.join(filter(str.isdigit, val))
+            return int(digits) if digits else 0
+            
+        t_val = get_val("ت")
+        total_val = get_num("كلي")
+        eligible_val = get_num("مستحق")
+        withheld_val = get_num("محجوب")
+        
         raw_records.append({
+            "ت_original": t_val,
             "اسم رب الأسرة": three_part_name,
-            "رقم البطاقة": selected_card_num,
-            "الكلي": total,
-            "محجوب": withheld,
-            "مستحق": eligible
+            "رقم البطاقة": card_digits,
+            "الكلي": total_val,
+            "مستحق": eligible_val,
+            "محجوب": withheld_val
         })
         
     df = pd.DataFrame(raw_records)
     if not df.empty:
         df = df.sort_values(by="اسم رب الأسرة").reset_index(drop=True)
         df.insert(0, "ت", df.index + 1)
-    return df
-
-# -----------------------------------------------------------------------------
-# محرك قراءة إضافي مخصص لكشوفات "القطع الغذائية" ذات الأعمدة السبعة الثابتة
-# -----------------------------------------------------------------------------
-def extract_ration_list_data(file_obj, card_choice):
-    file_ext = file_obj.name.split('.')[-1].lower()
-    header_row = None
-    data_rows = []
-
-    if file_ext == 'docx':
-        doc = Document(file_obj)
-        for table in doc.tables:
-            table_rows = [[cell.text.strip() for cell in row.cells] for row in table.rows]
-            if not table_rows:
-                continue
-            if header_row is None:
-                header_row = table_rows[0]
-                data_rows.extend(table_rows[1:])
-            else:
-                start = 1 if table_rows[0] == header_row else 0
-                data_rows.extend(table_rows[start:])
-
-    elif file_ext == 'xlsx':
-        xls = pd.ExcelFile(file_obj)
-        for sheet_name in xls.sheet_names:
-            df_excel = pd.read_excel(xls, sheet_name=sheet_name, header=0, dtype=str)
-            df_excel.columns = [str(c).strip() for c in df_excel.columns]
-            if header_row is None:
-                header_row = list(df_excel.columns)
-            for row in df_excel.values:
-                data_rows.append(["" if pd.isna(v) else str(v).strip() for v in row])
-
-    if not header_row:
-        return pd.DataFrame()
-
-    def find_col(possible_names):
-        for i, h in enumerate(header_row):
-            for name in possible_names:
-                if name in h:
-                    return i
-        return -1
-
-    idx_name = find_col(["اسم العائلة", "اسم رب"])
-    idx_old = find_col(["البطاقة القديمة"])
-    idx_new = find_col(["البطاقة الجديدة"])
-    idx_total = find_col(["الأفراد الكلية", "كلي"])
-    idx_eligible = find_col(["الأفراد المستحقة", "مستحق"])
-    idx_withheld = find_col(["المحجوبين", "محجوب"])
-
-    if -1 in (idx_name, idx_total, idx_eligible, idx_withheld):
-        return pd.DataFrame()
-
-    raw_records = []
-    for cells in data_rows:
-        if cells == header_row:
-            continue
-        if not any(str(c).strip() for c in cells):
-            continue
-        if idx_name >= len(cells):
-            continue
-            
-        if any("الإجمالي" in str(c) for c in cells) or any("المجموع" in str(c) for c in cells):
-            continue
-            
-        full_name = cells[idx_name]
-        name_parts = full_name.split()
-        three_part_name = " ".join(name_parts[:3])
+        df = df.drop(columns=["ت_original"], errors='ignore')
         
-        old_card_num = cells[idx_old] if idx_old != -1 else ""
-        new_card_num = cells[idx_new] if idx_new != -1 else ""
-        selected_card_num = new_card_num if card_choice == "رقم البطاقة الحديث" and new_card_num else old_card_num
-        if not selected_card_num:
-            selected_card_num = old_card_num or new_card_num
-            
-        try:
-            total = int(cells[idx_total]) if str(cells[idx_total]).isdigit() else 0
-            eligible = int(cells[idx_eligible]) if str(cells[idx_eligible]).isdigit() else 0
-            withheld = int(cells[idx_withheld]) if str(cells[idx_withheld]).isdigit() else 0
-            
-            raw_records.append({
-                "اسم رب الأسرة": three_part_name,
-                "رقم البطاقة": selected_card_num,
-                "الكلي": total,
-                "مستحق": eligible,
-                "محجوب": withheld
-            })
-        except ValueError:
-            continue
-
-    df = pd.DataFrame(raw_records)
-    if not df.empty:
-        df = df.sort_values(by="اسم رب الأسرة").reset_index(drop=True)
-        df.insert(0, "ت", df.index + 1)
     return df
 
 # -----------------------------------------------------------------------------
@@ -322,8 +216,7 @@ def extract_ration_list_data(file_obj, card_choice):
 # -----------------------------------------------------------------------------
 def normalize_card_number(card):
     s = str(card).strip()
-    if s.isdigit():
-        return str(int(s))
+    if s.isdigit(): return str(int(s))
     return s
 
 def build_name_reference_map(file_obj):
@@ -343,33 +236,26 @@ def build_name_reference_map(file_obj):
             for row in df_excel.values:
                 cells = []
                 for cell in row:
-                    if pd.isna(cell):
-                        continue
-                    if isinstance(cell, float) and cell.is_integer():
-                        cells.append(str(int(cell)))
-                    else:
-                        cells.append(str(cell).strip().replace('\n', ' '))
+                    if pd.isna(cell): continue
+                    if isinstance(cell, float) and cell.is_integer(): cells.append(str(int(cell)))
+                    else: cells.append(str(cell).strip().replace('\n', ' '))
                 rows_data.append(cells)
 
     reference_map = {}
     for cells in rows_data:
-        if not any(cells):
-            continue
+        if not any(cells): continue
         joined = "".join(cells)
-        if "المركز" in joined or "الوكيل" in joined or "اسم رب" in joined or "اسم العائلة" in joined:
-            continue
+        if "المركز" in joined or "الوكيل" in joined or "اسم رب" in joined or "اسم العائلة" in joined: continue
 
         name_idx, max_len = -1, 0
         for i, c in enumerate(cells):
             if any('\u0600' <= ch <= '\u06FF' for ch in c) and not any(ch.isdigit() for ch in c):
                 if len(c) > max_len:
                     max_len, name_idx = len(c), i
-        if name_idx == -1:
-            continue
+        if name_idx == -1: continue
 
         correct_name = cells[name_idx].strip()
-        if not correct_name:
-            continue
+        if not correct_name: continue
 
         for c in cells:
             if c.isdigit() and len(c) >= 5:
@@ -405,43 +291,29 @@ def apply_name_corrections(df, reference_map):
 
     df = df.sort_values(by="اسم رب الأسرة").reset_index(drop=True)
     df["ت"] = df.index + 1
-
     return df, pd.DataFrame(corrections)
 
 def light_auto_clean_name(name):
-    if not name:
-        return ""
+    if not name: return ""
     n = re.sub(r'[^\u0600-\u06FF\s]', ' ', str(name))
     return re.sub(r'\s+', ' ', n).strip()
 
 def build_known_name_tokens(reference_map):
     tokens = set()
-    for name in reference_map.values():
-        tokens.update(name.split())
+    for name in reference_map.values(): tokens.update(name.split())
     return tokens
 
 def detect_suspicious_name(name, known_tokens=None):
     reasons = []
     original = str(name).strip()
 
-    if not original:
-        return True, ["الاسم فارغ"]
-
-    if any(not ('\u0600' <= ch <= '\u06FF' or ch.isspace()) for ch in original):
-        reasons.append("يحتوي على رموز/أرقام/حروف غير عربية")
-
+    if not original: return True, ["الاسم فارغ"]
+    if any(not ('\u0600' <= ch <= '\u06FF' or ch.isspace()) for ch in original): reasons.append("يحتوي على رموز/أرقام/حروف غير عربية")
     words = original.split()
-    if len(words) < 3:
-        reasons.append(f"الاسم غير مكتمل ({len(words)} من 3 مقاطع متوقعة)")
-
-    if any(len(w) <= 1 for w in words):
-        reasons.append("يحتوي على مقطع من حرف واحد فقط (قد يكون ناقصاً)")
-
-    if re.search(r'(.)\1{2,}', original):
-        reasons.append("يحتوي على تكرار غير طبيعي لحرف واحد")
-
-    if not light_auto_clean_name(original):
-        reasons.append("الاسم بعد إزالة الشوائب أصبح فارغاً - على الأغلب غير مقروء بالكامل")
+    if len(words) < 3: reasons.append(f"الاسم غير مكتمل ({len(words)} من 3 مقاطع متوقعة)")
+    if any(len(w) <= 1 for w in words): reasons.append("يحتوي على مقطع من حرف واحد فقط (قد يكون ناقصاً)")
+    if re.search(r'(.)\1{2,}', original): reasons.append("يحتوي على تكرار غير طبيعي لحرف واحد")
+    if not light_auto_clean_name(original): reasons.append("الاسم بعد إزالة الشوائب أصبح فارغاً - على الأغلب غير مقروء بالكامل")
 
     if known_tokens:
         unknown_words = [w for w in words if len(w) > 1 and w not in known_tokens]
@@ -456,8 +328,7 @@ def flag_unresolved_suspicious_names(df, reference_map):
     for _, row in df.iterrows():
         card_display = str(row["رقم البطاقة"]).strip()
         card = normalize_card_number(card_display)
-        if card in reference_map:
-            continue
+        if card in reference_map: continue
         name = str(row["اسم رب الأسرة"]).strip()
         is_suspicious, reasons = detect_suspicious_name(name, known_tokens)
         if is_suspicious:
@@ -491,32 +362,23 @@ def build_corrections_report_excel(corrections_df, unresolved_df=None):
 # -----------------------------------------------------------------------------
 def build_professional_word_report(df, filename_base, card_choice):
     doc = Document()
-    
     for section in doc.sections:
-        section.top_margin = Cm(0.5)
-        section.bottom_margin = Cm(0.5)
-        section.left_margin = Cm(0.3)
-        section.right_margin = Cm(0.3)
+        section.top_margin, section.bottom_margin = Cm(0.5), Cm(0.5)
+        section.left_margin, section.right_margin = Cm(0.3), Cm(0.3)
         
     clean_name = filename_base
-    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز"]:
-        clean_name = clean_name.replace(w, "")
-    clean_name = re.sub(r'[a-zA-Z]', '', clean_name)
-    clean_name = re.sub(r'[\-_+_.]', '', clean_name)
-    clean_name = " ".join(clean_name.split())
+    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز"]: clean_name = clean_name.replace(w, "")
+    clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', '', clean_name).split())
     
     title_p = doc.add_paragraph()
     title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     title_run = title_p.add_run(f"الكشف الإحصائي المنسق للوكيل: {clean_name}")
-    title_run.font.name = "Segoe UI Semibold"
-    title_run.font.size = Pt(14)
-    title_run.bold = True
+    title_run.font.name, title_run.font.size, title_run.bold = "Segoe UI Semibold", Pt(14), True
     
     headers = ["ت", "اسم رب الأسرة", "حقل فارغ", "الكلي", "مستحق", "محجوب", card_choice, "ملاحظات"]
     table = doc.add_table(rows=1, cols=8)
-    table.style = 'Table Grid'
-    table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    set_table_borders(table, color_hex="2A4B7C")
+    table.style, table.alignment = 'Table Grid', WD_TABLE_ALIGNMENT.CENTER
+    set_table_borders(table, "2A4B7C")
     table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
     table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
     
@@ -525,7 +387,6 @@ def build_professional_word_report(df, filename_base, card_choice):
     col_widths = [Cm(0.9), dynamic_name_width, Cm(0.44), Cm(0.9), Cm(0.9), Cm(0.9), Cm(3.0), Cm(2.19)]
     
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
-    
     for i, title in enumerate(headers):
         table.rows[0].cells[i].width = col_widths[i]
         if i in [3, 4, 5]:
@@ -558,7 +419,8 @@ def build_professional_word_report(df, filename_base, card_choice):
 def build_professional_word_report_v2(df, filename_base, card_choice):
     doc = Document()
     for section in doc.sections:
-        section.top_margin, section.bottom_margin, section.left_margin, section.right_margin = Cm(0.5), Cm(0.5), Cm(0.3), Cm(0.3)
+        section.top_margin, section.bottom_margin = Cm(0.5), Cm(0.5)
+        section.left_margin, section.right_margin = Cm(0.3), Cm(0.3)
         
     clean_name = filename_base
     for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز"]: clean_name = clean_name.replace(w, "")
@@ -608,14 +470,10 @@ def build_professional_word_report_v2(df, filename_base, card_choice):
 def build_professional_word_report_v3(df, filename_base, card_choice):
     doc = Document()
     for section in doc.sections:
-        section.top_margin, section.bottom_margin, section.left_margin, section.right_margin = Cm(0.5), Cm(0.5), Cm(0.3), Cm(0.3)
+        section.top_margin, section.bottom_margin = Cm(0.5), Cm(0.5)
+        section.left_margin, section.right_margin = Cm(0.3), Cm(0.3)
         
-    clean_name = filename_base
-    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز"]:
-        clean_name = clean_name.replace(w, "")
-    clean_name = re.sub(r'[a-zA-Z]', '', clean_name)
-    clean_name = re.sub(r'[\-_+_.]', '', clean_name)
-    clean_name = " ".join(clean_name.split())
+    clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', '', filename_base).split())
     
     title_p = doc.add_paragraph()
     title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
@@ -624,9 +482,8 @@ def build_professional_word_report_v3(df, filename_base, card_choice):
     
     headers = ["ت", "اسم رب الأسرة", card_choice, "الكلي", "مستحق", "محجوب", "الشهر الأول", "الشهر الثاني", "الشهر الثالث", "الشهر الرابع"]
     table = doc.add_table(rows=1, cols=10)
-    table.style = 'Table Grid'
-    table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    set_table_borders(table, color_hex="2A4B7C")
+    table.style, table.alignment = 'Table Grid', WD_TABLE_ALIGNMENT.CENTER
+    set_table_borders(table, "2A4B7C")
     table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
     table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
     
@@ -648,112 +505,61 @@ def build_professional_word_report_v3(df, filename_base, card_choice):
         for i in range(10):
             row_cells[i].width = col_widths[i]
             val = row["ت"] if i==0 else row["اسم رب الأسرة"] if i==1 else row["رقم البطاقة"] if i==2 else row["الكلي"] if i==3 else row["مستحق"] if i==4 else row["محجوب"] if i==5 else ""
-            format_cell_advanced(row_cells[i], val, size_pt=16, font_name="Calibri", color_rgb=None, align="left" if i==1 else "center")
+            format_cell_advanced(row_cells[i], val, size_pt=16, font_name="Calibri", align="left" if i==1 else "center")
             
             if is_eligible_zero: set_cell_background(row_cells[i], "EC7063")
             else:
                 if i == 0: set_cell_background(row_cells[i], "D4E6F1")
-            
             if i == 3: set_cell_background(row_cells[i], "E5E7E9")
             if i == 5: set_cell_background(row_cells[i], "FCF3CF")
     return save_doc_buffer(doc, df)
 
 def build_professional_word_report_v4(df, filename_base, card_choice):
     doc = Document()
-    
     for section in doc.sections:
-        section.top_margin = Cm(0.5)
-        section.bottom_margin = Cm(0.5)
-        section.left_margin = Cm(0.3)
-        section.right_margin = Cm(0.3)
+        section.top_margin, section.bottom_margin = Cm(0.5), Cm(0.5)
+        section.left_margin, section.right_margin = Cm(0.3), Cm(0.3)
         
-    clean_name = filename_base
-    words_to_remove = ["مستكشف", "معدل", "كشف", "منسق", "جاهز"]
-    for w in words_to_remove:
-        clean_name = clean_name.replace(w, "")
-    clean_name = re.sub(r'[a-zA-Z]', '', clean_name)
-    clean_name = re.sub(r'[\-_+_.]', '', clean_name)
-    clean_name = " ".join(clean_name.split())
+    clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', '', filename_base).split())
     
     title_p = doc.add_paragraph()
     title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     title_run = title_p.add_run(f"الكشف الإحصائي المنسق للوكيل: {clean_name}")
-    title_run.font.name = "Segoe UI Semibold"
-    title_run.font.size = Pt(14)
-    title_run.bold = True
+    title_run.font.name, title_run.font.size, title_run.bold = "Segoe UI Semibold", Pt(14), True
     
     headers = ["ت", card_choice, "اسم المواطن", "العدد الكلي"] + [f"سلة {i}" for i in range(1, 13)]
-    
     table = doc.add_table(rows=1, cols=16)
-    table.style = 'Table Grid'
-    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    table.style, table.alignment = 'Table Grid', WD_TABLE_ALIGNMENT.CENTER
+    set_table_borders(table, "2A4B7C")
+    table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
+    table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
     
-    set_table_borders(table, color_hex="2A4B7C")
-    
-    tblPr = table._tbl.tblPr
-    tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
-    
-    trPr = table.rows[0]._tr.get_or_add_trPr()
-    trPr.append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
-    
-    max_name_len = max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15)
-    dynamic_name_width = Cm(max_name_len * 0.22 + 0.5)
-    
-    col_widths = [
-        Cm(0.9),              
-        Cm(2.5),              
-        dynamic_name_width,   
-        Cm(0.9)               
-    ] + [Cm(1.05)] * 12       
-    
+    dynamic_name_width = Cm(max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15) * 0.22 + 0.5)
+    col_widths = [Cm(0.9), Cm(2.5), dynamic_name_width, Cm(0.9)] + [Cm(1.05)] * 12       
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
     
     hdr_cells = table.rows[0].cells
     for i, title in enumerate(headers):
         hdr_cells[i].width = col_widths[i]
-        
-        if i >= 3:
-            set_cell_vertical_text(hdr_cells[i])
-        
-        cell_align = "left" if i == 2 else "center"
-        format_cell_advanced(hdr_cells[i], title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align=cell_align, color_rgb=COLOR_NAVY_BLUE)
+        if i >= 3: set_cell_vertical_text(hdr_cells[i])
+        format_cell_advanced(hdr_cells[i], title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="left" if i == 2 else "center", color_rgb=COLOR_NAVY_BLUE)
             
-    HEX_ELEGANT_BLUE = "D4E6F1"
-    HEX_LIGHT_GREEN = "E8F8F5"
-    HEX_ALERT_RED = "EC7063"
-    
     for idx, row in df.iterrows():
         row_cells = table.add_row().cells
-        r_trPr = table.rows[idx+1]._tr.get_or_add_trPr()
-        r_trPr.append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
-        
+        table.rows[idx+1]._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
         is_eligible_zero = int(row["مستحق"]) == 0
-        
         set_cell_no_wrap(row_cells[2])
         
         for i in range(16):
             row_cells[i].width = col_widths[i]
-            
-            val = ""
-            cell_align = "center"
-            font_size = 14  
-            
-            if i == 0: val = row["ت"]
-            elif i == 1: val = row["رقم البطاقة"]
-            elif i == 2: 
-                val = row["اسم رب الأسرة"]
-                cell_align = "left" 
-            elif i == 3: val = row["الكلي"] 
-            elif i >= 4: val = "" 
-                    
-            format_cell_advanced(row_cells[i], val, size_pt=font_size, font_name="Calibri", color_rgb=None, align=cell_align)
+            val = row["ت"] if i == 0 else row["رقم البطاقة"] if i == 1 else row["اسم رب الأسرة"] if i == 2 else row["الكلي"] if i == 3 else "" 
+            format_cell_advanced(row_cells[i], val, size_pt=14, font_name="Calibri", align="left" if i == 2 else "center")
             
             if is_eligible_zero:
-                set_cell_background(row_cells[i], HEX_ALERT_RED)
+                set_cell_background(row_cells[i], "EC7063")
             else:
-                if i == 0: set_cell_background(row_cells[i], HEX_ELEGANT_BLUE)
-                if i == 3: set_cell_background(row_cells[i], HEX_LIGHT_GREEN)
-
+                if i == 0: set_cell_background(row_cells[i], "D4E6F1")
+                if i == 3: set_cell_background(row_cells[i], "E8F8F5")
     return save_doc_buffer(doc, df)
 
 def save_doc_buffer(doc, df):
@@ -773,16 +579,11 @@ def save_doc_buffer(doc, df):
         f"العدد الكلي للمحجوبين = {total_withheld}"
     )
     stats_text_run = stats_p.add_run(stats_text)
-    stats_text_run.font.name = "Segoe UI Semibold"
-    stats_text_run.font.size = Pt(13)
-    stats_text_run.bold = True
+    stats_text_run.font.name, stats_text_run.font.size, stats_text_run.bold = "Segoe UI Semibold", Pt(13), True
     stats_text_run.font.color.rgb = COLOR_NAVY_BLUE
 
     footer = doc.sections[0].footer
-    if len(footer.paragraphs) == 0:
-        footer_p = footer.add_paragraph()
-    else:
-        footer_p = footer.paragraphs[0]
+    footer_p = footer.paragraphs[0] if len(footer.paragraphs) > 0 else footer.add_paragraph()
     footer_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     footer_p.clear()
     f_run = footer_p.add_run("صفحة ")
@@ -803,7 +604,7 @@ def save_doc_buffer(doc, df):
 # واجهة استخدام التطبيق (Streamlit Interface)
 # -----------------------------------------------------------------------------
 st.markdown("<h3 style='text-align: right;'>📂 رفع الكشف المراد تدقيقه وتنسيقه للمطبعة</h3>", unsafe_allow_html=True)
-uploaded_file = st.file_uploader("ارفع كشف الوكلاء", type=['docx', 'xlsx'], key="doc_input_v6", label_visibility="collapsed")
+uploaded_file = st.file_uploader("ارفع كشف الوكلاء", type=['docx', 'xlsx'], key="doc_input_v7", label_visibility="collapsed")
 
 st.markdown("<h4 style='text-align: right;'>📚 قاعدة الأسماء الصحيحة (اختياري) - لتصحيح الأسماء التالفة أو المقلوبة</h4>", unsafe_allow_html=True)
 reference_file = st.file_uploader(
@@ -811,12 +612,11 @@ reference_file = st.file_uploader(
     type=['xlsx', 'docx'],
     key="ref_db_input_v1",
     label_visibility="collapsed",
-    help="ملف يحتوي على أرقام البطاقات مع الأسماء الصحيحة الكاملة. سيتم استخدامه لمطابقة رقم البطاقة تلقائياً واستبدال أي اسم تالف أو مقلوب بالاسم الصحيح."
 )
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-col1, col2, col3 = st.columns([1, 1.4, 1.4])
+col1, col2 = st.columns([1, 1.4])
 
 with col1:
     selected_card = st.radio(
@@ -839,19 +639,6 @@ with col2:
         horizontal=False
     )
 
-with col3:
-    input_format_choice = st.radio(
-        "🗂️ اختر طريقة قراءة الملف المرفوع:",
-        [
-            "تلقائي (يفحص الأعمدة ويختار الأنسب)",
-            "فرض القراءة العامة",
-            "فرض كشف القطع الغذائية (7 أعمدة ثابتة)"
-        ],
-        index=0,
-        horizontal=False,
-        help="الوضع التلقائي يجرّب أولاً قراءة الأعمدة السبعة الثابتة، فإن لم تتطابق ترويسة الملف معها ينتقل تلقائياً للقراءة العامة."
-    )
-
 st.markdown("<br>", unsafe_allow_html=True)
 
 if uploaded_file:
@@ -860,31 +647,18 @@ if uploaded_file:
     if (st.session_state.output_filename != current_filename or 
         st.session_state.selected_card != selected_card or 
         st.session_state.template_choice != template_choice or
-        st.session_state.input_format_choice != input_format_choice or
         st.session_state.reference_filename != current_ref_name):
         st.session_state.processing_done = False
 
 if st.button("⚙️ تشغيل محرك التنظيم والتنسيق المتقدم الكلي"):
     if uploaded_file:
-        with st.spinner('جاري ترتيب القيود أبجدياً وإعداد التنسيق الشرطي والمقاييس...'):
+        with st.spinner('جاري قراءة العناوين وتسكين البيانات في أماكنها الحقيقية...'):
             try:
-                if input_format_choice == "فرض كشف القطع الغذائية (7 أعمدة ثابتة)":
-                    df_res = extract_ration_list_data(uploaded_file, selected_card)
-                    if df_res.empty:
-                        st.error("لم يتم التعرف على أعمدة كشف القطع الغذائية المتوقعة في هذا الملف.")
-                elif input_format_choice == "فرض القراءة العامة":
-                    df_res = extract_and_clean_data(uploaded_file, selected_card)
-                    if df_res.empty:
-                        st.error("لم يتم العثور على بيانات جداول متوافقة.")
+                df_res = extract_data_by_headers(uploaded_file, selected_card)
+                
+                if df_res.empty:
+                    st.error("لم يتم العثور على ترويسة صحيحة في الملف المرفوع (تأكد من وجود عناوين للأعمدة مثل: اسم، كلي، مستحق).")
                 else:
-                    df_res = extract_ration_list_data(uploaded_file, selected_card)
-                    if df_res.empty:
-                        uploaded_file.seek(0)
-                        df_res = extract_and_clean_data(uploaded_file, selected_card)
-                        if df_res.empty:
-                            st.error("لم يتم العثور على بيانات جداول متوافقة بأي من طريقتي القراءة.")
-
-                if not df_res.empty:
                     corrections_df = pd.DataFrame(columns=["رقم البطاقة", "الاسم قبل التصحيح", "الاسم بعد التصحيح"])
                     unresolved_df = pd.DataFrame()
                     matched_count = 0
@@ -903,7 +677,6 @@ if st.button("⚙️ تشغيل محرك التنظيم والتنسيق الم�
                     st.session_state.output_filename = uploaded_file.name.rsplit('.', 1)[0]
                     st.session_state.selected_card = selected_card
                     st.session_state.template_choice = template_choice
-                    st.session_state.input_format_choice = input_format_choice
                     st.session_state.reference_filename = reference_file.name if reference_file else ""
                     st.session_state.processing_done = True
             except Exception as e:
@@ -917,7 +690,7 @@ if st.session_state.processing_done:
     used_card_type = st.session_state.selected_card
     used_template = st.session_state.template_choice
     
-    st.success(f"✅ تم التنظيم الأبجدي بنجاح لـ ({len(df_final)}) قيد اسم (تم قصرها على الاسم الثلاثي).")
+    st.success(f"✅ تم سحب البيانات وتنظيمها أبجدياً بنجاح لـ ({len(df_final)}) قيد (بدقة متطابقة مع العناوين).")
 
     corrections_df = st.session_state.corrections_df
     unresolved_df = st.session_state.unresolved_df
@@ -927,12 +700,10 @@ if st.session_state.processing_done:
 
     if corrections_df is not None and not corrections_df.empty:
         st.markdown(
-            f"<div class='report-box'>🛠️ تم تصحيح <b>{len(corrections_df)}</b> اسم تالف/مقلوب اعتماداً على مطابقة رقم البطاقة مع قاعدة الأسماء الصحيحة.</div>",
+            f"<div class='report-box'>🛠️ تم تصحيح <b>{len(corrections_df)}</b> اسم تالف/مقلوب.</div>",
             unsafe_allow_html=True
         )
         st.dataframe(corrections_df, use_container_width=True)
-    elif reference_file:
-        st.info("ℹ️ لم يتم العثور على أي أسماء تحتاج تصحيحاً بمطابقة أرقام البطاقات مع القاعدة المرفوعة.")
 
     if unresolved_df is not None and not unresolved_df.empty:
         st.markdown(
@@ -944,7 +715,7 @@ if st.session_state.processing_done:
     if reference_file and ((corrections_df is not None and not corrections_df.empty) or (unresolved_df is not None and not unresolved_df.empty)):
         corrections_report = build_corrections_report_excel(corrections_df, unresolved_df)
         st.download_button(
-            label="📥 تحميل تقرير تصحيح ومراجعة الأسماء (Excel - ورقتين)",
+            label="📥 تحميل تقرير تصحيح ومراجعة الأسماء (Excel)",
             data=corrections_report,
             file_name=f"تقرير_تصحيح_الاسماء_{output_filename}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
