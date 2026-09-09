@@ -97,7 +97,7 @@ def format_cell_advanced(cell, text, bold=False, color_rgb=None, size_pt=16, fon
         run.font.size = Pt(size_pt)
 
 # -----------------------------------------------------------------------------
-# محرك قراءة وتنظيف البيانات المطور (يدعم Word و Excel) بالخوارزمية الرياضية
+# محرك قراءة وتنظيف البيانات المطور (يدعم Word و Excel)
 # -----------------------------------------------------------------------------
 def extract_and_clean_data(file_obj, card_choice):
     raw_records = []
@@ -105,7 +105,6 @@ def extract_and_clean_data(file_obj, card_choice):
     
     file_ext = file_obj.name.split('.')[-1].lower()
     
-    # قراءة الملف حسب صيغته وتحويله إلى صفوف موحدة
     if file_ext == 'docx':
         doc = Document(file_obj)
         for table in doc.tables:
@@ -141,7 +140,7 @@ def extract_and_clean_data(file_obj, card_choice):
                     name_idx = i
         if name_idx == -1: continue
         
-        # 1. استخراج أرقام البطاقات بصرامة (5 أرقام فأكثر) وعزلها عن الإحصائيات
+        # 1. استخراج أرقام البطاقات (5 أرقام فأكثر)
         card_candidates = [c for c in cells if c.isdigit() and len(c) >= 5]
         if not card_candidates: continue
         
@@ -149,44 +148,57 @@ def extract_and_clean_data(file_obj, card_choice):
         new_card_num = card_candidates[1] if len(card_candidates) > 1 else old_card_num
         selected_card_num = new_card_num if card_choice == "رقم البطاقة الحديث" else old_card_num
         
-        # 2. استخراج الأرقام الصغيرة فقط (التي تقل عن 100) لتمثيل أفراد العائلة والتسلسل
+        # 2. استخراج الأرقام الصغيرة
         small_nums = [int(c) for c in cells if c.isdigit() and int(c) < 100]
         
         total, eligible, withheld = 0, 0, 0
         found_stats = False
         
-        # 3. الخوارزمية الرياضية: البحث عن التطابق (الكلي = مستحق + محجوب)
+        # 3. الخوارزمية الرياضية: استخدام المعادلة للفحص فقط، وسحب الأرقام كما هي من الملف تماماً
         if len(small_nums) >= 3:
             for i in range(len(small_nums) - 2):
                 a, b, c = small_nums[i], small_nums[i+1], small_nums[i+2]
-                # الترتيب المتوقع الأول (محجوب، مستحق، كلي)
-                if c == a + b:
-                    withheld, eligible, total = a, b, c
+                
+                # الترتيب الأول: المحجوب ثم المستحق ثم الكلي
+                if c == (a + b):
+                    withheld = a
+                    eligible = b
+                    total = c  # أخذ الرقم الكلي كما هو من الملف وليس ناتجاً حسابياً
                     found_stats = True
                     break
-                # الترتيب المتوقع الثاني (كلي، مستحق، محجوب)
-                elif a == b + c:
-                    total, eligible, withheld = a, b, c
+                # الترتيب الثاني: الكلي ثم المستحق ثم المحجوب
+                elif a == (b + c):
+                    total = a  # أخذ الرقم الكلي كما هو من الملف
+                    eligible = b
+                    withheld = c
                     found_stats = True
                     break
         
-        # الخطة البديلة الأولى: إذا كان المحجوب 0 قد نجد فقط رقمين متطابقين (كلي ومستحق)
+        # الخطة البديلة الأولى: إذا كان المحجوب 0 قد نجد فقط رقمين متطابقين في الملف (كلي ومستحق)
         if not found_stats and len(small_nums) >= 2:
             for i in range(len(small_nums) - 1):
                 a, b = small_nums[i], small_nums[i+1]
                 if a == b:
-                    total, eligible, withheld = a, b, 0
+                    total = a
+                    eligible = b
+                    withheld = 0
                     found_stats = True
                     break
         
-        # الخطة البديلة النهائية الصارمة (في حال نقص البيانات)
-        if not found_stats and len(small_nums) >= 2:
-            # استبعاد أول رقم غالباً لأنه التسلسل (ت)
-            candidates = small_nums[1:] if len(small_nums) >= 3 else small_nums
-            total = max(candidates)
+        # الخطة البديلة النهائية الصارمة (سحب الأرقام كما هي دون أي عمليات حسابية استنتاجية)
+        if not found_stats and len(small_nums) >= 3:
+            candidates = small_nums[-3:]
+            total = max(candidates) # الكلي هو الرقم الأكبر الموجود بالملف
             candidates.remove(total)
-            eligible = max(candidates) if candidates else total
-            withheld = total - eligible
+            eligible = max(candidates) # المستحق هو الأكبر بعد الكلي
+            candidates.remove(eligible)
+            withheld = candidates[0] # المحجوب هو ما تبقى
+            found_stats = True
+        elif not found_stats and len(small_nums) == 2:
+            total = max(small_nums)
+            eligible = min(small_nums)
+            withheld = 0
+            found_stats = True
             
         # 4. فلتر الحماية الأخير: استحالة أن يكون المحجوب أو المستحق أكبر من الكلي
         if withheld < 0 or withheld > total or eligible > total:
