@@ -88,6 +88,7 @@ if "processing_done" not in st.session_state:
     st.session_state.name_choice = ""
     st.session_state.sort_choice = ""
     st.session_state.merge_choice = ""
+    st.session_state.extraction_warnings = {}
 
 # -----------------------------------------------------------------------------
 # مساعدات التنسيق المتقدمة لملفات Word
@@ -283,8 +284,11 @@ def setup_document_layout(doc, filename_base, is_a3=False):
 # -----------------------------------------------------------------------------
 # محرك استخراج البيانات اعتماداً على عناوين الأعمدة الفعلية (تقارير منسّقة)
 # -----------------------------------------------------------------------------
+_ARABIC_DIACRITICS_RE = re.compile(r'[ؐ-ًؚ-ٰٟۖ-ۜ۟-۪ۨ-ۭ]')
+
 def _normalize_header_cell(cell):
-    return str(cell).replace(" ", "").replace("أ", "ا").replace("إ", "ا")
+    text = _ARABIC_DIACRITICS_RE.sub('', str(cell))
+    return text.replace(" ", "").replace("أ", "ا").replace("إ", "ا").replace("آ", "ا")
 
 def _locate_header_row(rows_data):
     empty_idx_map = {"ت": -1, "اسم": -1, "كلي": -1, "مستحق": -1, "محجوب": -1, "بطاقة_قديم": -1, "بطاقة_حديث": -1}
@@ -296,24 +300,26 @@ def _locate_header_row(rows_data):
         if len(row) < 4 or any(len(cell) > 30 for cell in row):
             continue
 
-        row_joined = "".join(row).replace(" ", "")
-        if not ("اسم" in row_joined and ("كلي" in row_joined or "مستحق" in row_joined or "بطاق" in row_joined or "تموين" in row_joined)):
+        row_joined = _normalize_header_cell("".join(row))
+        if not ("اسم" in row_joined and ("كلي" in row_joined or "مجموع" in row_joined or "مستحق" in row_joined or "بطاق" in row_joined or "تموين" in row_joined)):
             continue
 
         idx_map = dict(empty_idx_map)
         for j, cell in enumerate(row):
             c = _normalize_header_cell(cell)
+            if not c:
+                continue
             if c in ["ت", "تسلسل", "التسلسل", "م"]:
                 idx_map["ت"] = j
             elif "اسم" in c:
                 idx_map["اسم"] = j
-            elif "كلي" in c or "اجمالي" in c:
+            elif "كلي" in c or "اجمالي" in c or "مجموع" in c:
                 idx_map["كلي"] = j
             elif "مستحق" in c:
                 idx_map["مستحق"] = j
             elif "محجوب" in c:
                 idx_map["محجوب"] = j
-            elif "بطاق" in c or "تموين" in c or "رقم" in c:
+            elif "تسلسل" not in c and ("بطاق" in c or "تموين" in c or "رقم" in c):
                 if "حديث" in c or "جديد" in c:
                     idx_map["بطاقة_حديث"] = j
                 elif "قديم" in c or "سابق" in c:
@@ -376,6 +382,41 @@ def _extract_records_by_headers(rows_data, card_choice, name_length_choice):
 
     return records
 
+def _validate_extracted_records(records):
+    """فحص أمان: يبحث عن مؤشرات على خطأ بتحديد مكان الأعمدة (كأن ينزلق رقم البطاقة إلى عمود الكلي)
+    ويُرجع رسائل تحذير واضحة للمستخدم بدل تمرير بيانات خاطئة بصمت."""
+    warnings = []
+    if not records:
+        return warnings
+
+    n = len(records)
+
+    huge_total = sum(1 for r in records if r.get("الكلي", 0) >= 1000)
+    if huge_total:
+        warnings.append(
+            f"يحتوي عمود \"الكلي\" على قيمة كبيرة جداً (1000 فأكثر) في {huge_total} من {n} سجل — "
+            f"هذا غير منطقي لعدد أفراد الأسرة، ويُحتمل أن عمود \"الكلي\" أُخذ خطأً من عمود رقم البطاقة. "
+            f"يرجى مراجعة ترويسة الملف الأصلي."
+        )
+
+    exceeds = sum(1 for r in records if r.get("مستحق", 0) > r.get("الكلي", 0))
+    if exceeds:
+        warnings.append(
+            f"في {exceeds} من {n} سجل، \"مستحق\" أكبر من \"الكلي\" — وهذا غير منطقي (لا يمكن أن يتجاوز "
+            f"عدد المستحقين عدد أفراد الأسرة الكلي). يُحتمل وجود خطأ في تحديد مكان الأعمدة."
+        )
+
+    card_keys = [k for k in records[0].keys() if k.startswith("رقم البطاقة")]
+    for key in card_keys:
+        missing_or_short = sum(1 for r in records if len(str(r.get(key, ""))) < 4)
+        if missing_or_short > n * 0.5:
+            warnings.append(
+                f"عمود \"{key}\" فاضي أو قصير جداً (أقل من 4 خانات) في أكثر من نصف السجلات "
+                f"({missing_or_short} من {n}) — يُحتمل أن قراءة رقم البطاقة من الملف الأصلي غير صحيحة."
+            )
+
+    return warnings
+
 # -----------------------------------------------------------------------------
 # محرك قراءة وتنظيف البيانات المطور
 # -----------------------------------------------------------------------------
@@ -409,12 +450,13 @@ def extract_and_clean_data(file_obj, card_choice, name_length_choice, sort_alpha
 
     header_records = _extract_records_by_headers(rows_data, card_choice, name_length_choice)
     if header_records is not None:
+        warnings = _validate_extracted_records(header_records)
         df = pd.DataFrame(header_records)
         if not df.empty:
             if sort_alphabetically:
                 df = df.sort_values(by="اسم رب الأسرة").reset_index(drop=True)
             df.insert(0, "ت", df.index + 1)
-        return df
+        return df, warnings
 
     for cells in rows_data:
         if not any(cells) or "المركز" in "".join(cells) or "الوكيل" in "".join(cells) or "اسم رب" in "".join(cells):
@@ -468,12 +510,13 @@ def extract_and_clean_data(file_obj, card_choice, name_length_choice, sort_alpha
             "مستحق": eligible
         })
         
+    warnings = _validate_extracted_records(raw_records)
     df = pd.DataFrame(raw_records)
     if not df.empty:
         if sort_alphabetically:
             df = df.sort_values(by="اسم رب الأسرة").reset_index(drop=True)
         df.insert(0, "ت", df.index + 1)
-    return df
+    return df, warnings
 
 # -----------------------------------------------------------------------------
 # دوال إنشاء النماذج (1 إلى 7) بصيغة Word
@@ -1951,11 +1994,14 @@ if st.button("⚙️ تشغيل محرك التنظيم والتنسيق الم�
         with st.spinner(f'جاري معالجة {order_desc}{mode_desc} وإعداد التنسيق الشرطي والمقاييس...'):
             try:
                 extracted = []
+                file_warnings = {}
                 for f in uploaded_files:
-                    df_res = extract_and_clean_data(f, selected_card, name_length_choice, sort_alphabetically)
+                    df_res, extraction_warnings = extract_and_clean_data(f, selected_card, name_length_choice, sort_alphabetically)
                     if not df_res.empty:
                         extracted.append({"filename": f.name.rsplit('.', 1)[0], "df": df_res})
                         log_processed_file(f.name, len(df_res), selected_card, name_length_choice, template_choice, sort_choice)
+                        if extraction_warnings:
+                            file_warnings[f.name] = extraction_warnings
 
                 if extracted:
                     if merge_files:
@@ -1978,6 +2024,7 @@ if st.button("⚙️ تشغيل محرك التنظيم والتنسيق الم�
                     st.session_state.name_choice = name_length_choice
                     st.session_state.sort_choice = sort_choice
                     st.session_state.merge_choice = merge_choice
+                    st.session_state.extraction_warnings = file_warnings
                     st.session_state.processing_done = True
                 else:
                     st.error("لم يتم العثور على بيانات جداول متوافقة في الملفات المرفوعة.")
@@ -1995,6 +2042,10 @@ if st.session_state.processing_done:
     mode_note = "تم دمج الملفات المرفوعة بملف واحد" if st.session_state.merge_choice == "دمج كل الملفات في ملف واحد وترتيبها" else f"تمت معالجة {len(results)} ملف بشكل منفصل"
 
     st.success(f"✅ {mode_note} بنجاح ({order_note}).")
+
+    for fname, warns in st.session_state.extraction_warnings.items():
+        for w in warns:
+            st.warning(f"⚠️ تنبيه فحص بيانات — ملف \"{fname}\": {w}")
 
     def build_word_for_template(df_final, output_filename, used_card_type, used_template, used_sort_alphabetically=True):
         if used_template == "النموذج الأول (الأصلي المطور)":
