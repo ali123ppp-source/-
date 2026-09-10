@@ -85,6 +85,7 @@ if "processing_done" not in st.session_state:
     st.session_state.template_choice = ""
     st.session_state.name_choice = ""
     st.session_state.sort_choice = ""
+    st.session_state.merge_choice = ""
 
 # -----------------------------------------------------------------------------
 # مساعدات التنسيق المتقدمة لملفات Word
@@ -1588,7 +1589,15 @@ def build_pdf_report(df, filename_base, card_choice, template_choice):
 # واجهة استخدام التطبيق (Streamlit Interface)
 # -----------------------------------------------------------------------------
 st.markdown("<h3 style='text-align: right;'>📂 رفع الكشف المراد تدقيقه وتنسيقه للمطبعة</h3>", unsafe_allow_html=True)
-uploaded_files = st.file_uploader("ارفع كشف الوكلاء (يمكنك رفع أكثر من ملف، وكل ملف يُعالج ويُصدَّر بشكل منفصل)", type=['docx', 'xlsx'], accept_multiple_files=True, key="doc_input_v8", label_visibility="collapsed")
+uploaded_files = st.file_uploader("ارفع كشف الوكلاء (يمكنك رفع أكثر من ملف)", type=['docx', 'xlsx'], accept_multiple_files=True, key="doc_input_v8", label_visibility="collapsed")
+
+merge_choice = st.radio(
+    "📎 عند رفع أكثر من ملف:",
+    ["معالجة كل ملف بشكل منفرد", "دمج كل الملفات في ملف واحد وترتيبها"],
+    index=0,
+    horizontal=True
+)
+merge_files = (merge_choice == "دمج كل الملفات في ملف واحد وترتيبها")
 
 st.markdown("<br>", unsafe_allow_html=True)
 
@@ -1643,28 +1652,44 @@ if uploaded_files:
         st.session_state.selected_card != selected_card or
         st.session_state.template_choice != template_choice or
         st.session_state.name_choice != name_length_choice or
-        st.session_state.sort_choice != sort_choice):
+        st.session_state.sort_choice != sort_choice or
+        st.session_state.merge_choice != merge_choice):
         st.session_state.processing_done = False
 
 if st.button("⚙️ تشغيل محرك التنظيم والتنسيق المتقدم الكلي"):
     if uploaded_files:
-        spinner_msg = 'جاري معالجة وترتيب القيود أبجدياً وإعداد التنسيق الشرطي والمقاييس لكل ملف على حدة...' if sort_alphabetically else 'جاري معالجة القيود (بترتيب الملف الأصلي) لكل ملف على حدة...'
-        with st.spinner(spinner_msg):
+        order_desc = 'وترتيب القيود أبجدياً ' if sort_alphabetically else '(بترتيب الملف الأصلي) '
+        mode_desc = 'ودمجها بملف واحد' if merge_files else 'لكل ملف على حدة'
+        with st.spinner(f'جاري معالجة {order_desc}{mode_desc} وإعداد التنسيق الشرطي والمقاييس...'):
             try:
-                results = []
+                extracted = []
                 for f in uploaded_files:
                     df_res = extract_and_clean_data(f, selected_card, name_length_choice, sort_alphabetically)
                     if not df_res.empty:
-                        results.append({"filename": f.name.rsplit('.', 1)[0], "df": df_res})
+                        extracted.append({"filename": f.name.rsplit('.', 1)[0], "df": df_res})
                         log_processed_file(f.name, len(df_res), selected_card, name_length_choice, template_choice, sort_choice)
 
-                if results:
+                if extracted:
+                    if merge_files:
+                        merged_df = pd.concat([e["df"] for e in extracted], ignore_index=True)
+                        if sort_alphabetically:
+                            merged_df = merged_df.sort_values(by="اسم رب الأسرة").reset_index(drop=True)
+                        merged_df["ت"] = merged_df.index + 1
+                        if len(extracted) > 1:
+                            merged_filename = "مدمج_" + "_".join([e["filename"][:10] for e in extracted])
+                        else:
+                            merged_filename = extracted[0]["filename"]
+                        results = [{"filename": merged_filename, "df": merged_df}]
+                    else:
+                        results = extracted
+
                     st.session_state.results = results
                     st.session_state.uploaded_filenames = [f.name for f in uploaded_files]
                     st.session_state.selected_card = selected_card
                     st.session_state.template_choice = template_choice
                     st.session_state.name_choice = name_length_choice
                     st.session_state.sort_choice = sort_choice
+                    st.session_state.merge_choice = merge_choice
                     st.session_state.processing_done = True
                 else:
                     st.error("لم يتم العثور على بيانات جداول متوافقة في الملفات المرفوعة.")
@@ -1678,8 +1703,9 @@ if st.session_state.processing_done:
     used_template = st.session_state.template_choice
     order_note = "أبجدياً" if st.session_state.sort_choice == "ترتيب أبجدي بحسب الاسم" else "بترتيب الملف الأصلي"
     results = st.session_state.results
+    mode_note = "تم دمج الملفات المرفوعة بملف واحد" if st.session_state.merge_choice == "دمج كل الملفات في ملف واحد وترتيبها" else f"تمت معالجة {len(results)} ملف بشكل منفصل"
 
-    st.success(f"✅ تمت معالجة {len(results)} ملف بنجاح (كل ملف بشكل منفصل، {order_note}).")
+    st.success(f"✅ {mode_note} بنجاح ({order_note}).")
 
     def build_word_for_template(df_final, output_filename, used_card_type, used_template):
         if used_template == "النموذج الأول (الأصلي المطور)":
