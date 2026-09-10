@@ -111,6 +111,24 @@ def test_long_realistic_header_labels_not_rejected():
 
 
 # ---------------------------------------------------------------------------
+# 1ج) ملاحظة منهجية موزَّعة على أربع خلايا (كل خلية 30-60 حرفاً بمفردها) تحتوي
+#     بالصدفة كل الكلمات المطلوبة في خلايا منفصلة يجب ألا تُطابَق كصف ترويسة —
+#     طول الخلية وحده لا يكفي لتمييزها، فهذا يفحص عدد الكلمات أيضاً.
+# ---------------------------------------------------------------------------
+def test_multi_cell_note_not_mistaken_for_header():
+    adversarial_row = [
+        "ملاحظة توضيحية حول اسم رب الاسرة المسجل بالكشف",
+        "بيانات اضافية عن العدد الكلي المسجل بالنظام",
+        "نص ثالث يشرح كيفية حساب عدد الافراد المستحقين",
+        "نص رابع يوضح آلية تصنيف الافراد المحجوبين هنا",
+    ]
+    rows_data = [adversarial_row, ["1", "زينب عباس كاظم", "1234567", "6", "6", "0"]]
+    header_idx, idx_map = app._locate_header_row(rows_data)
+    check("multi_cell_note: note row NOT mistaken for a header row despite matching all keywords",
+          header_idx == -1, detail=str(idx_map))
+
+
+# ---------------------------------------------------------------------------
 # 2) مرادف جديد لعمود "الكلي": "مجموع" بدل "كلي"/"اجمالي".
 # ---------------------------------------------------------------------------
 def test_total_column_synonym_majmoo():
@@ -373,6 +391,7 @@ def main():
     tests = [
         test_real_world_layout_with_blank_column,
         test_long_realistic_header_labels_not_rejected,
+        test_multi_cell_note_not_mistaken_for_header,
         test_total_column_synonym_majmoo,
         test_majmoo_does_not_shadow_mustahiq_or_mahjoob,
         test_sequence_number_column_not_treated_as_card,
