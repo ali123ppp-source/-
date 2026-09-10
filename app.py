@@ -319,7 +319,8 @@ def _locate_header_row(rows_data):
                 idx_map["محجوب"] = j
             elif "كلي" in c or "اجمالي" in c or "مجموع" in c:
                 idx_map["كلي"] = j
-            elif "تسلسل" not in c and ("بطاق" in c or "تموين" in c or "رقم" in c):
+            elif ("تسلسل" not in c and not any(w in c for w in ["هاتف", "موبايل", "جوال", "تلفون", "فون"])
+                  and ("بطاق" in c or "تموين" in c or "رقم" in c)):
                 if "حديث" in c or "جديد" in c:
                     idx_map["بطاقة_حديث"] = j
                 elif "قديم" in c or "سابق" in c:
@@ -344,7 +345,8 @@ def _extract_records_by_headers(rows_data, card_choice, name_length_choice):
         row = rows_data[i]
         row_joined = "".join(row)
         row_joined_norm = _normalize_header_cell(row_joined)
-        if not row_joined or "المجموع" in row_joined_norm or "الاجمالي" in row_joined_norm or "الوكيل" in row_joined_norm:
+        if (not row_joined or "مجموع" in row_joined_norm or "اجمالي" in row_joined_norm
+                or re.search(r'\bالوكيل\b', row_joined_norm)):
             continue
 
         def get_val(key):

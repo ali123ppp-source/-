@@ -145,6 +145,55 @@ def test_sequence_number_column_not_treated_as_card():
 
 
 # ---------------------------------------------------------------------------
+# 3ب) عمود "رقم الهاتف" يجب ألا يُعامَل كعمود بطاقة عندما يسبق عمود البطاقة الحقيقي.
+# ---------------------------------------------------------------------------
+def test_phone_number_column_not_treated_as_card():
+    rows_data = [
+        ["ت", "اسم رب الأسرة", "رقم الهاتف", "رقم البطاقة", "الكلي", "مستحق", "محجوب"],
+        ["1", "خالد حسن فرج", "07701234567", "9988776", "3", "3", "0"],
+    ]
+    header_idx, idx_map = app._locate_header_row(rows_data)
+    check("phone_column: header found", header_idx == 0, detail=str(idx_map))
+    check("phone_column: 'رقم الهاتف' not mistaken for the card column",
+          idx_map["بطاقة_قديم"] != 2, detail=str(idx_map))
+    check("phone_column: real card column detected at index 3",
+          idx_map["بطاقة_قديم"] == 3, detail=str(idx_map))
+    records = app._extract_records_by_headers(rows_data, "رقم البطاقة القديم", "الاسم الثلاثي فقط")
+    check("phone_column: extracted card number is the real card, not the phone",
+          records is not None and records[0]["رقم البطاقة"] == "9988776", detail=str(records))
+
+
+# ---------------------------------------------------------------------------
+# 3ج) اسم عائلة يحتوي "الوكيلي" كلاحقة يجب ألا يُستبعد بالخلط مع كلمة "الوكيل".
+# ---------------------------------------------------------------------------
+def test_name_containing_alwakeeli_suffix_not_dropped():
+    rows_data = [
+        ["ت", "اسم رب الأسرة", "رقم البطاقة", "الكلي", "مستحق", "محجوب"],
+        ["1", "زينب عباس كاظم", "1234567", "6", "6", "0"],
+        ["2", "علي حسين الوكيلي", "7654321", "4", "4", "0"],
+    ]
+    records = app._extract_records_by_headers(rows_data, "رقم البطاقة القديم", "الاسم الثلاثي فقط")
+    check("alwakeeli_name: both real records kept", records is not None and len(records) == 2,
+          detail=str(records))
+
+
+# ---------------------------------------------------------------------------
+# 3د) صف إجمالي بعنوان "مجموع" وحدها (بدون "ال") يجب أن يُستبعد كصف تذييل،
+#     خصوصاً أن "مجموع" أصبحت مرادفاً مقبولاً لعمود "الكلي" بالترويسة.
+# ---------------------------------------------------------------------------
+def test_bare_majmoo_footer_row_excluded():
+    rows_data = [
+        ["ت", "اسم رب الأسرة", "رقم البطاقة", "مجموع الافراد", "مستحق", "محجوب"],
+        ["1", "زينب عباس كاظم", "1234567", "6", "6", "0"],
+        ["2", "علي حسين جبار", "7654321", "4", "4", "0"],
+        ["", "مجموع", "", "10", "10", "0"],
+    ]
+    records = app._extract_records_by_headers(rows_data, "رقم البطاقة القديم", "الاسم الثلاثي فقط")
+    check("bare_majmoo_footer: footer row excluded, only real people kept",
+          records is not None and len(records) == 2, detail=str(records))
+
+
+# ---------------------------------------------------------------------------
 # 4) التشكيل (diacritics) بعنوان العمود لا يجب أن يكسر المطابقة.
 # ---------------------------------------------------------------------------
 def test_diacritics_do_not_break_matching():
@@ -248,6 +297,9 @@ def main():
         test_total_column_synonym_majmoo,
         test_majmoo_does_not_shadow_mustahiq_or_mahjoob,
         test_sequence_number_column_not_treated_as_card,
+        test_phone_number_column_not_treated_as_card,
+        test_name_containing_alwakeeli_suffix_not_dropped,
+        test_bare_majmoo_footer_row_excluded,
         test_diacritics_do_not_break_matching,
         test_validator_flags_leaked_card_number_in_total,
         test_validator_flags_mustahiq_exceeding_total,
