@@ -1589,38 +1589,74 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
         card_vals = [(row["رقم البطاقة القديم"], ""), (row["رقم البطاقة الحديث"], "")] if is_combined else [(row["رقم البطاقة"], "")]
 
         if template_choice == "النموذج الأول (الأصلي المطور)":
-            vals = [
-                (row["ت"], ter_bg),
-                *card_vals,
-                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
-                ("x" if is_eligible_zero else "", ""),
-                (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
-                (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
-                (row["محجوب"], "background-color: #FADBD8;" if not is_eligible_zero else ""),
-                ("محجوب" if is_eligible_zero else "", "color: #CB4335; font-weight: bold;" if is_eligible_zero else "")
-            ]
+            if is_combined:
+                vals = [
+                    (row["ت"], ter_bg),
+                    *card_vals,
+                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                    ("x" if is_eligible_zero else "", ""),
+                    (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
+                    (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
+                    (row["محجوب"], "background-color: #FADBD8;" if not is_eligible_zero else ""),
+                    ("محجوب" if is_eligible_zero else "", "color: #CB4335; font-weight: bold;" if is_eligible_zero else "")
+                ]
+            else:
+                vals = [
+                    (row["ت"], ter_bg),
+                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                    ("x" if is_eligible_zero else "", ""),
+                    (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
+                    (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
+                    (row["محجوب"], "background-color: #FADBD8;" if not is_eligible_zero else ""),
+                    *card_vals,
+                    ("محجوب" if is_eligible_zero else "", "color: #CB4335; font-weight: bold;" if is_eligible_zero else "")
+                ]
         elif template_choice == "النموذج الثاني (حجم 14 وحقلين فارغين)":
-            vals = [
-                (row["ت"], ter_bg),
-                *card_vals,
-                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
-                ("x" if is_eligible_zero else "", ""),
-                ("x" if is_eligible_zero else "", ""),
-                (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
-                (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
-                (row["محجوب"], "background-color: #E5E7E9;" if not is_eligible_zero else ""),
-                ("محجوب" if is_eligible_zero else "", "color: #CB4335; font-weight: bold;" if is_eligible_zero else "")
-            ]
+            if is_combined:
+                vals = [
+                    (row["ت"], ter_bg),
+                    *card_vals,
+                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                    ("x" if is_eligible_zero else "", ""),
+                    ("x" if is_eligible_zero else "", ""),
+                    (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
+                    (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
+                    (row["محجوب"], "background-color: #E5E7E9;" if not is_eligible_zero else ""),
+                    ("محجوب" if is_eligible_zero else "", "color: #CB4335; font-weight: bold;" if is_eligible_zero else "")
+                ]
+            else:
+                vals = [
+                    (row["ت"], ter_bg),
+                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                    ("x" if is_eligible_zero else "", ""),
+                    ("x" if is_eligible_zero else "", ""),
+                    (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
+                    (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
+                    (row["محجوب"], "background-color: #E5E7E9;" if not is_eligible_zero else ""),
+                    *card_vals,
+                    ("محجوب" if is_eligible_zero else "", "color: #CB4335; font-weight: bold;" if is_eligible_zero else "")
+                ]
         elif template_choice == "النموذج الثالث (خط 16، عناوين 12، 4 أشهر)":
-            vals = [
-                (row["ت"], ter_bg),
-                *card_vals,
-                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
-                (row["الكلي"], "background-color: #E5E7E9;" if not is_eligible_zero else ""),
-                (row["مستحق"], ""),
-                (row["محجوب"], "background-color: #FCF3CF;" if not is_eligible_zero else ""),
-                ("", ""), ("", ""), ("", ""), ("", "")
-            ]
+            if is_combined:
+                vals = [
+                    (row["ت"], ter_bg),
+                    *card_vals,
+                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                    (row["الكلي"], "background-color: #E5E7E9;" if not is_eligible_zero else ""),
+                    (row["مستحق"], ""),
+                    (row["محجوب"], "background-color: #FCF3CF;" if not is_eligible_zero else ""),
+                    ("", ""), ("", ""), ("", ""), ("", "")
+                ]
+            else:
+                vals = [
+                    (row["ت"], ter_bg),
+                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                    *card_vals,
+                    (row["الكلي"], "background-color: #E5E7E9;" if not is_eligible_zero else ""),
+                    (row["مستحق"], ""),
+                    (row["محجوب"], "background-color: #FCF3CF;" if not is_eligible_zero else ""),
+                    ("", ""), ("", ""), ("", ""), ("", "")
+                ]
         elif template_choice == "النموذج الرابع (12 سلة، العدد الكلي)":
             vals = [
                 (row["ت"], ter_bg),
@@ -1643,15 +1679,26 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
                 (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else "")
             ] + [("", "")] * 8
         elif template_choice == "النموذج السابع (تفصيل المواد الغذائية)":
-            vals = [
-                (row["ت"], ter_bg),
-                *card_vals,
-                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
-                (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
-                (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
-                (row["محجوب"], "background-color: #FADBD8;" if not is_eligible_zero else ""),
-                ("", ""), ("", ""), ("", ""), ("", ""), ("", ""), ("", ""), ("", "")
-            ]
+            if is_combined:
+                vals = [
+                    (row["ت"], ter_bg),
+                    *card_vals,
+                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                    (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
+                    (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
+                    (row["محجوب"], "background-color: #FADBD8;" if not is_eligible_zero else ""),
+                    ("", ""), ("", ""), ("", ""), ("", ""), ("", ""), ("", ""), ("", "")
+                ]
+            else:
+                vals = [
+                    (row["ت"], ter_bg),
+                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                    *card_vals,
+                    (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
+                    (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
+                    (row["محجوب"], "background-color: #FADBD8;" if not is_eligible_zero else ""),
+                    ("", ""), ("", ""), ("", ""), ("", ""), ("", ""), ("", ""), ("", "")
+                ]
         else:
             vals = [
                 (row["ت"], ter_bg),
