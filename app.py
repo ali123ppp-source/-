@@ -344,9 +344,13 @@ def _extract_records_by_headers(rows_data, card_choice, name_length_choice):
     for i in range(header_idx + 1, len(rows_data)):
         row = rows_data[i]
         row_joined = "".join(row)
-        row_joined_norm = _normalize_header_cell(row_joined)
-        if (not row_joined or "مجموع" in row_joined_norm or "اجمالي" in row_joined_norm
-                or re.search(r'\bالوكيل\b', row_joined_norm)):
+        # نحافظ على المسافات بين الخلايا هنا (بعكس _normalize_header_cell) لأن الفحوصات
+        # أدناه تعتمد على حدود الكلمات لتمييز صف تذييل حقيقي ("المجموع") من نص عرضي
+        # يحتوي المقطع كجزء من كلمة أطول ("مجموعة سكنية") أو اسم عائلة ("الوكيلي").
+        row_text_norm = " ".join(row).replace("أ", "ا").replace("إ", "ا").replace("آ", "ا")
+        if (not row_joined or re.search(r'مجموع(?!\w)', row_text_norm)
+                or re.search(r'اجمالي(?!\w)', row_text_norm)
+                or re.search(r'الوكيل(?!\w)', row_text_norm)):
             continue
 
         def get_val(key):

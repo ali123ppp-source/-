@@ -178,6 +178,36 @@ def test_name_containing_alwakeeli_suffix_not_dropped():
 
 
 # ---------------------------------------------------------------------------
+# 3هـ) الحالة الإيجابية: صف تذييل حقيقي بعنوان "الوكيل ..." يجب أن يُستبعد فعلاً
+#     (وليس فقط ألا يُستبعد اسم "الوكيلي" خطأً — الحالتان مختلفتان ويجب اختبار كل منهما).
+# ---------------------------------------------------------------------------
+def test_real_alwakeel_footer_row_is_excluded():
+    rows_data = [
+        ["ت", "اسم رب الأسرة", "رقم البطاقة", "الكلي", "مستحق", "محجوب"],
+        ["1", "زينب عباس كاظم", "1234567", "6", "6", "0"],
+        ["", "الوكيل خالد ياسين", "", "10", "10", "0"],
+    ]
+    records = app._extract_records_by_headers(rows_data, "رقم البطاقة القديم", "الاسم الثلاثي فقط")
+    check("real_alwakeel_footer: footer row excluded, only the real person kept",
+          records is not None and len(records) == 1, detail=str(records))
+
+
+# ---------------------------------------------------------------------------
+# 3و) خلية تحتوي "مجموعة" (كجزء من عبارة عرضية) يجب ألا تُطابَق كصف تذييل —
+#     المطابقة يجب أن تتوقف عند حدود الكلمة، لا أي ظهور للمقطع.
+# ---------------------------------------------------------------------------
+def test_majmooa_inside_unrelated_word_not_treated_as_footer():
+    rows_data = [
+        ["ت", "اسم رب الأسرة", "رقم البطاقة", "الكلي", "مستحق", "محجوب"],
+        ["1", "زينب عباس كاظم", "1234567", "6", "6", "0"],
+        ["2", "مجموعة سكنية جديدة", "7654321", "4", "4", "0"],
+    ]
+    records = app._extract_records_by_headers(rows_data, "رقم البطاقة القديم", "الاسم الثلاثي فقط")
+    check("majmooa_unrelated: both rows kept, not mistaken for a totals footer",
+          records is not None and len(records) == 2, detail=str(records))
+
+
+# ---------------------------------------------------------------------------
 # 3د) صف إجمالي بعنوان "مجموع" وحدها (بدون "ال") يجب أن يُستبعد كصف تذييل،
 #     خصوصاً أن "مجموع" أصبحت مرادفاً مقبولاً لعمود "الكلي" بالترويسة.
 # ---------------------------------------------------------------------------
@@ -299,6 +329,8 @@ def main():
         test_sequence_number_column_not_treated_as_card,
         test_phone_number_column_not_treated_as_card,
         test_name_containing_alwakeeli_suffix_not_dropped,
+        test_real_alwakeel_footer_row_is_excluded,
+        test_majmooa_inside_unrelated_word_not_treated_as_footer,
         test_bare_majmoo_footer_row_excluded,
         test_diacritics_do_not_break_matching,
         test_validator_flags_leaked_card_number_in_total,
