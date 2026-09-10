@@ -796,6 +796,80 @@ def build_professional_word_report_v6(df, filename_base, card_choice):
                 
     return save_doc_buffer(doc, df)
 
+# --- النموذج الثامن: مطابق للسادس (العدد المستحق) لكن بـ 8 سلات، وعناوين بلتفاف عادي
+# مع حساب عرض كل عمود رياضياً حسب أطول محتوى فيه (بدل عرض ثابت مخمّن) ---
+def build_professional_word_report_v8(df, filename_base, card_choice):
+    doc = Document()
+    setup_document_layout(doc, filename_base)
+
+    clean_name = filename_base
+    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج"]: clean_name = clean_name.replace(w, "")
+    clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', '', clean_name).split())
+
+    title_p = doc.add_paragraph()
+    title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    title_run = title_p.add_run(f"الكشف الإحصائي المنسق للوكيل: {clean_name}")
+    title_run.font.name, title_run.font.size, title_run.bold = "Segoe UI Semibold", Pt(14), True
+
+    headers = ["ت", card_choice, "اسم المواطن", "العدد المستحق"] + [f"سلة {i}" for i in range(1, 9)]
+    table = doc.add_table(rows=1, cols=12)
+    table.style, table.alignment = 'Table Grid', WD_TABLE_ALIGNMENT.CENTER
+    set_table_borders(table, color_hex="2A4B7C")
+    table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
+    table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
+
+    table.rows[0].height = Inches(0.6)
+
+    def dynamic_col_width(series, min_chars=1, char_cm=0.22, padding_cm=0.5):
+        max_len = max(series.astype(str).str.len().max(), min_chars)
+        return Cm(max_len * char_cm + padding_cm)
+
+    ت_width = dynamic_col_width(df["ت"])
+    card_width = dynamic_col_width(df["رقم البطاقة"])
+    name_width = dynamic_col_width(df["اسم رب الأسرة"], min_chars=15)
+    count_width = dynamic_col_width(df["مستحق"])
+    col_widths = [ت_width, card_width, name_width, count_width] + [Cm(1.05)] * 8
+    COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
+    hdr_cells = table.rows[0].cells
+
+    for i, title in enumerate(headers):
+        cell = hdr_cells[i]
+        cell.width = col_widths[i]
+        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        if i == 1:
+            format_header_cell_two_lines(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", color_rgb=COLOR_NAVY_BLUE)
+        else:
+            format_cell_advanced(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="left" if i == 2 else "center", color_rgb=COLOR_NAVY_BLUE)
+
+    for idx, row in df.iterrows():
+        new_row = table.add_row()
+        new_row.height = Inches(0.4)
+        row_cells = new_row.cells
+        table.rows[idx+1]._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
+        is_eligible_zero = int(row["مستحق"]) == 0
+        set_cell_no_wrap(row_cells[2])
+
+        for i in range(12):
+            cell = row_cells[i]
+            cell.width = col_widths[i]
+            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+
+            val = row["ت"] if i == 0 else row["رقم البطاقة"] if i == 1 else row["اسم رب الأسرة"] if i == 2 else row["مستحق"] if i == 3 else ""
+            cell_align = "left" if i == 2 else "center"
+
+            if i == 2:
+                format_name_cell_with_small_suffix(cell, val, base_size=14, small_size=10, font_name="Calibri", color_rgb=None, align="left")
+            else:
+                format_cell_advanced(cell, val, size_pt=14, font_name="Calibri", color_rgb=None, align=cell_align)
+
+            if is_eligible_zero:
+                set_cell_background(cell, "EC7063")
+            else:
+                if i == 0: set_cell_background(cell, "D4E6F1")
+                if i == 3: set_cell_background(cell, "E8F8F5")
+
+    return save_doc_buffer(doc, df)
+
 # --- الدالة الجديدة للنموذج السابع (تفاصيل المواد) ---
 def build_professional_word_report_v7(df, filename_base, card_choice):
     doc = Document()
@@ -935,6 +1009,9 @@ def build_pdf_report(df, filename_base, card_choice, template_choice):
     elif template_choice == "النموذج السادس (12 سلة، العدد المستحق)":
         headers = ["ت", card_choice, "اسم المواطن", "العدد المستحق"] + [f"سلة {i}" for i in range(1, 13)]
         page_orientation = "landscape"
+    elif template_choice == "النموذج الثامن (8 سلات، العدد المستحق)":
+        headers = ["ت", card_choice, "اسم المواطن", "العدد المستحق"] + [f"سلة {i}" for i in range(1, 9)]
+        page_orientation = "landscape"
     elif template_choice == "النموذج السابع (تفصيل المواد الغذائية)":
         headers = ["ت", "اسم رب الأسرة", card_choice, "الكلي", "المستحق", "المحجوب", "سكر", "زيت", "تمن", "معجون", "فاصوليا", "عدس", "حمص"]
         page_orientation = "landscape"
@@ -997,6 +1074,13 @@ def build_pdf_report(df, filename_base, card_choice, template_choice):
                 (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
                 (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else "")
             ] + [("", "")] * 12
+        elif template_choice == "النموذج الثامن (8 سلات، العدد المستحق)":
+            vals = [
+                (row["ت"], "background-color: #D4E6F1;" if not is_eligible_zero else ""),
+                (row["رقم البطاقة"], ""),
+                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else "")
+            ] + [("", "")] * 8
         elif template_choice == "النموذج السابع (تفصيل المواد الغذائية)":
             vals = [
                 (row["ت"], "background-color: #D4E6F1;" if not is_eligible_zero else ""),
@@ -1160,7 +1244,8 @@ with col3:
             "النموذج الرابع (12 سلة، العدد الكلي)",
             "النموذج الخامس (ورقة A3، حقول كبيرة، خط Uighur)",
             "النموذج السادس (12 سلة، العدد المستحق)",
-            "النموذج السابع (تفصيل المواد الغذائية)"
+            "النموذج السابع (تفصيل المواد الغذائية)",
+            "النموذج الثامن (8 سلات، العدد المستحق)"
         ],
         index=0,
         horizontal=False
@@ -1233,6 +1318,8 @@ if st.session_state.processing_done:
             return build_professional_word_report_v6(df_final, output_filename, used_card_type)
         elif used_template == "النموذج السابع (تفصيل المواد الغذائية)":
             return build_professional_word_report_v7(df_final, output_filename, used_card_type)
+        elif used_template == "النموذج الثامن (8 سلات، العدد المستحق)":
+            return build_professional_word_report_v8(df_final, output_filename, used_card_type)
         else:
             return build_professional_word_report_v5(df_final, output_filename, used_card_type)
 
