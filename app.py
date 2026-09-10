@@ -230,31 +230,44 @@ def _normalize_header_cell(cell):
     return str(cell).replace(" ", "").replace("أ", "ا").replace("إ", "ا")
 
 def _locate_header_row(rows_data):
-    idx_map = {"ت": -1, "اسم": -1, "كلي": -1, "مستحق": -1, "محجوب": -1, "بطاقة_قديم": -1, "بطاقة_حديث": -1}
+    empty_idx_map = {"ت": -1, "اسم": -1, "كلي": -1, "مستحق": -1, "محجوب": -1, "بطاقة_قديم": -1, "بطاقة_حديث": -1}
+    required = ["اسم", "كلي", "مستحق", "محجوب"]
+
     for i, row in enumerate(rows_data):
+        # صف ترويسة حقيقي يتكوّن من خلايا عناوين منفصلة (قصيرة)، لا فقرة نصية واحدة طويلة
+        # (مثل ملاحظات منهجية قد تحتوي بالصدفة على كلمات مشابهة لعناوين الأعمدة)
+        if len(row) < 4 or any(len(cell) > 30 for cell in row):
+            continue
+
         row_joined = "".join(row).replace(" ", "")
-        if "اسم" in row_joined and ("كلي" in row_joined or "مستحق" in row_joined or "بطاق" in row_joined or "تموين" in row_joined):
-            for j, cell in enumerate(row):
-                c = _normalize_header_cell(cell)
-                if c in ["ت", "تسلسل", "التسلسل", "م"]:
-                    idx_map["ت"] = j
-                elif "اسم" in c:
-                    idx_map["اسم"] = j
-                elif "كلي" in c or "اجمالي" in c:
-                    idx_map["كلي"] = j
-                elif "مستحق" in c:
-                    idx_map["مستحق"] = j
-                elif "محجوب" in c:
-                    idx_map["محجوب"] = j
-                elif "بطاق" in c or "تموين" in c or "رقم" in c:
-                    if "حديث" in c or "جديد" in c:
-                        idx_map["بطاقة_حديث"] = j
-                    elif "قديم" in c or "سابق" in c:
-                        idx_map["بطاقة_قديم"] = j
-                    elif idx_map["بطاقة_قديم"] == -1:
-                        idx_map["بطاقة_قديم"] = j
+        if not ("اسم" in row_joined and ("كلي" in row_joined or "مستحق" in row_joined or "بطاق" in row_joined or "تموين" in row_joined)):
+            continue
+
+        idx_map = dict(empty_idx_map)
+        for j, cell in enumerate(row):
+            c = _normalize_header_cell(cell)
+            if c in ["ت", "تسلسل", "التسلسل", "م"]:
+                idx_map["ت"] = j
+            elif "اسم" in c:
+                idx_map["اسم"] = j
+            elif "كلي" in c or "اجمالي" in c:
+                idx_map["كلي"] = j
+            elif "مستحق" in c:
+                idx_map["مستحق"] = j
+            elif "محجوب" in c:
+                idx_map["محجوب"] = j
+            elif "بطاق" in c or "تموين" in c or "رقم" in c:
+                if "حديث" in c or "جديد" in c:
+                    idx_map["بطاقة_حديث"] = j
+                elif "قديم" in c or "سابق" in c:
+                    idx_map["بطاقة_قديم"] = j
+                elif idx_map["بطاقة_قديم"] == -1:
+                    idx_map["بطاقة_قديم"] = j
+
+        if all(idx_map[k] != -1 for k in required):
             return i, idx_map
-    return -1, idx_map
+
+    return -1, empty_idx_map
 
 def _extract_records_by_headers(rows_data, card_choice, name_length_choice):
     header_idx, idx_map = _locate_header_row(rows_data)
@@ -267,7 +280,8 @@ def _extract_records_by_headers(rows_data, card_choice, name_length_choice):
     for i in range(header_idx + 1, len(rows_data)):
         row = rows_data[i]
         row_joined = "".join(row)
-        if not row_joined or "المجموع" in row_joined or "الاجمالي" in row_joined or "الوكيل" in row_joined:
+        row_joined_norm = _normalize_header_cell(row_joined)
+        if not row_joined or "المجموع" in row_joined_norm or "الاجمالي" in row_joined_norm or "الوكيل" in row_joined_norm:
             continue
 
         def get_val(key):
@@ -330,8 +344,8 @@ def extract_and_clean_data(file_obj, card_choice, name_length_choice, sort_alpha
                 cells = []
                 for cell in row:
                     if pd.isna(cell):
-                        continue
-                    if isinstance(cell, float) and cell.is_integer():
+                        cells.append("")
+                    elif isinstance(cell, float) and cell.is_integer():
                         cells.append(str(int(cell)))
                     else:
                         cells.append(str(cell).strip().replace('\n', ' '))
