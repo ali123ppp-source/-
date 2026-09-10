@@ -1629,10 +1629,12 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
         <style>
             @page {{
                 size: {page_size} {page_orientation};
-                margin: 8mm 6mm;
+                margin: 10mm 8mm;
                 @bottom-center {{
                     content: "صفحة " counter(page);
-                    font-size: 10pt;
+                    font-size: 9pt;
+                    font-weight: normal;
+                    color: #7A8AA3;
                     font-family: Arial, sans-serif;
                 }}
             }}
@@ -1643,12 +1645,27 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
                 margin: 0;
                 padding: 0;
             }}
-            .title {{
-                text-align: right;
-                font-size: 14pt;
+            .invoice-card {{
+                border: 2.5px solid #1B3A63;
+                border-radius: 20px;
+                overflow: hidden;
+            }}
+            .invoice-header {{
+                background-color: #1B3A63;
+                color: #FFFFFF;
+                padding: 12px 20px 10px;
+                border-bottom: 4px solid #D4AC0D;
+            }}
+            .invoice-title {{
+                font-size: 15pt;
                 font-weight: bold;
-                color: #2A4B7C;
-                margin-bottom: 8px;
+                letter-spacing: 0.3px;
+            }}
+            .invoice-subtitle {{
+                font-size: 9pt;
+                font-weight: normal;
+                opacity: 0.85;
+                margin-top: 4px;
             }}
             table {{
                 width: 100%;
@@ -1656,45 +1673,59 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
                 font-size: 11pt;
             }}
             th {{
-                background-color: #F2F4F8;
-                color: #2A4B7C;
-                border: 1px solid #2A4B7C;
-                padding: 6px 4px;
+                background-color: #EAF0F8;
+                color: #1B3A63;
+                border: 1px solid #C3D0E3;
+                padding: 7px 4px;
                 text-align: center;
                 font-weight: bold;
             }}
             td {{
-                border: 1px solid #2A4B7C;
+                border: 1px solid #C3D0E3;
                 padding: 4px 3px;
                 text-align: center;
                 vertical-align: middle;
                 white-space: nowrap;
                 font-weight: bold;
             }}
+            tbody tr:nth-child(even) td {{
+                background-color: #F6F9FC;
+            }}
+            .invoice-footer {{
+                background-color: #F4F7FB;
+                border-top: 2px solid #1B3A63;
+                padding: 12px 20px;
+            }}
             .stats {{
-                margin-top: 12px;
                 text-align: right;
                 font-weight: bold;
                 font-size: 12pt;
-                color: #2A4B7C;
-                line-height: 1.5;
+                color: #1B3A63;
+                line-height: 1.6;
             }}
         </style>
     </head>
     <body>
-        <div class="title">الكشف الإحصائي المنسق للوكيل: {clean_name}</div>
-        <table>
-            <thead>
-                <tr>{headers_html}</tr>
-            </thead>
-            <tbody>
-                {rows_html}
-            </tbody>
-        </table>
-        <div class="stats">
-            العدد الكلي للافراد = {total_all}<br>
-            العدد الكلي للمستحقين = {total_eligible}<br>
-            العدد الكلي للمحجوبين = {total_withheld}
+        <div class="invoice-card">
+            <div class="invoice-header">
+                <div class="invoice-title">الكشف الإحصائي المنسق للوكيل: {clean_name}</div>
+                <div class="invoice-subtitle">سجل إلكتروني رسمي — نظام تنسيق كشوفات الوكلاء</div>
+            </div>
+            <table>
+                <thead>
+                    <tr>{headers_html}</tr>
+                </thead>
+                <tbody>
+                    {rows_html}
+                </tbody>
+            </table>
+            <div class="invoice-footer">
+                <div class="stats">
+                    العدد الكلي للافراد = {total_all}<br>
+                    العدد الكلي للمستحقين = {total_eligible}<br>
+                    العدد الكلي للمحجوبين = {total_withheld}
+                </div>
+            </div>
         </div>
     </body>
     </html>
