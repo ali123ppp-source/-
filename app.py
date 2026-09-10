@@ -286,9 +286,14 @@ def setup_document_layout(doc, filename_base, is_a3=False):
 # -----------------------------------------------------------------------------
 _ARABIC_DIACRITICS_RE = re.compile(r'[ؐ-ًؚ-ٰٟۖ-ۜ۟-۪ۨ-ۭ]')
 
+def _strip_diacritics_and_unify_hamza(text):
+    """يزيل التشكيل ويوحّد أشكال الهمزة/الألف، مع الحفاظ على المسافات (بعكس
+    _normalize_header_cell) — مفيد حين تهم حدود الكلمات، كتمييز أول كلمة بحقل الاسم."""
+    text = _ARABIC_DIACRITICS_RE.sub('', str(text))
+    return text.replace("أ", "ا").replace("إ", "ا").replace("آ", "ا")
+
 def _normalize_header_cell(cell):
-    text = _ARABIC_DIACRITICS_RE.sub('', str(cell))
-    return text.replace(" ", "").replace("أ", "ا").replace("إ", "ا").replace("آ", "ا")
+    return _strip_diacritics_and_unify_hamza(cell).replace(" ", "")
 
 def _locate_header_row(rows_data):
     empty_idx_map = {"ت": -1, "اسم": -1, "كلي": -1, "مستحق": -1, "محجوب": -1, "بطاقة_قديم": -1, "بطاقة_حديث": -1}
@@ -340,17 +345,12 @@ def _extract_records_by_headers(rows_data, card_choice, name_length_choice):
         return None
 
     take = 4 if name_length_choice == "الاسم الرباعي (إن وجد)" else 3
+    footer_label_re = re.compile(r'(ال)?(مجموع|اجمالي|وكيل)$')
     records = []
     for i in range(header_idx + 1, len(rows_data)):
         row = rows_data[i]
         row_joined = "".join(row)
-        # نحافظ على المسافات بين الخلايا هنا (بعكس _normalize_header_cell) لأن الفحوصات
-        # أدناه تعتمد على حدود الكلمات لتمييز صف تذييل حقيقي ("المجموع") من نص عرضي
-        # يحتوي المقطع كجزء من كلمة أطول ("مجموعة سكنية") أو اسم عائلة ("الوكيلي").
-        row_text_norm = " ".join(row).replace("أ", "ا").replace("إ", "ا").replace("آ", "ا")
-        if (not row_joined or re.search(r'مجموع(?!\w)', row_text_norm)
-                or re.search(r'اجمالي(?!\w)', row_text_norm)
-                or re.search(r'الوكيل(?!\w)', row_text_norm)):
+        if not row_joined:
             continue
 
         def get_val(key):
@@ -363,6 +363,15 @@ def _extract_records_by_headers(rows_data, card_choice, name_length_choice):
 
         name_val = get_val("اسم")
         if not name_val or len(name_val) < 3:
+            continue
+
+        # صف تذييل/توقيع (مثل "المجموع" أو "الوكيل خالد ياسين") يُميَّز عن اسم عائلة
+        # حقيقي بأن الكلمة الدالة تقع في *أول* حقل الاسم، بعكس اسم شخص حقيقي قد
+        # ينتهي بلقب عائلة مثل "خالد ياسين الوكيل" — الفحص هنا على أول كلمة فقط،
+        # لا الحقل كاملاً، حتى لا يُستبعد اسم حقيقي أو كلمة أطول تبدأ بنفس الحروف
+        # ("مجموعة سكنية" مثلاً).
+        first_word = _strip_diacritics_and_unify_hamza(name_val).split()[0]
+        if footer_label_re.fullmatch(first_word):
             continue
 
         final_name = " ".join(name_val.split()[:take])

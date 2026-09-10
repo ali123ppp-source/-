@@ -208,6 +208,36 @@ def test_majmooa_inside_unrelated_word_not_treated_as_footer():
 
 
 # ---------------------------------------------------------------------------
+# 3ز) لقب عائلة حقيقي "الوكيل" في *آخر* حقل الاسم (لا أوّله) يجب ألا يُستبعد —
+#     هذا هو الفارق الجوهري بين اسم شخص حقيقي وصف تذييل يبدأ بالكلمة الدالة.
+# ---------------------------------------------------------------------------
+def test_real_person_surnamed_alwakeel_not_excluded():
+    rows_data = [
+        ["ت", "اسم رب الأسرة", "رقم البطاقة", "الكلي", "مستحق", "محجوب"],
+        ["1", "زينب عباس كاظم", "1234567", "6", "6", "0"],
+        ["2", "خالد ياسين الوكيل", "7654321", "4", "4", "0"],
+    ]
+    records = app._extract_records_by_headers(rows_data, "رقم البطاقة القديم", "الاسم الثلاثي فقط")
+    check("surname_alwakeel: real person with surname الوكيل is kept, not excluded",
+          records is not None and len(records) == 2, detail=str(records))
+
+
+# ---------------------------------------------------------------------------
+# 3ح) صف تذييل بتشكيل ("مَجْموع") يجب أن يُستبعد أيضاً — إزالة التشكيل يجب أن
+#     تُطبَّق على حقل الاسم في هذا الفحص، لا فقط على صفوف الترويسة.
+# ---------------------------------------------------------------------------
+def test_diacritized_footer_label_excluded():
+    rows_data = [
+        ["ت", "اسم رب الأسرة", "رقم البطاقة", "الكلي", "مستحق", "محجوب"],
+        ["1", "زينب عباس كاظم", "1234567", "6", "6", "0"],
+        ["", "مَجْموع", "", "10", "10", "0"],
+    ]
+    records = app._extract_records_by_headers(rows_data, "رقم البطاقة القديم", "الاسم الثلاثي فقط")
+    check("diacritized_footer: diacritized 'مَجْموع' footer row excluded",
+          records is not None and len(records) == 1, detail=str(records))
+
+
+# ---------------------------------------------------------------------------
 # 3د) صف إجمالي بعنوان "مجموع" وحدها (بدون "ال") يجب أن يُستبعد كصف تذييل،
 #     خصوصاً أن "مجموع" أصبحت مرادفاً مقبولاً لعمود "الكلي" بالترويسة.
 # ---------------------------------------------------------------------------
@@ -331,6 +361,8 @@ def main():
         test_name_containing_alwakeeli_suffix_not_dropped,
         test_real_alwakeel_footer_row_is_excluded,
         test_majmooa_inside_unrelated_word_not_treated_as_footer,
+        test_real_person_surnamed_alwakeel_not_excluded,
+        test_diacritized_footer_label_excluded,
         test_bare_majmoo_footer_row_excluded,
         test_diacritics_do_not_break_matching,
         test_validator_flags_leaked_card_number_in_total,
