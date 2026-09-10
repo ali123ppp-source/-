@@ -1637,7 +1637,8 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
                 }}
             }}
             body {{
-                font-family: 'Segoe UI', 'Arial', sans-serif;
+                font-family: 'Segoe UI Semibold', 'Segoe UI', 'Calibri', 'Tahoma', 'Arial', sans-serif;
+                font-weight: bold;
                 direction: rtl;
                 margin: 0;
                 padding: 0;
@@ -1668,6 +1669,7 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
                 text-align: center;
                 vertical-align: middle;
                 white-space: nowrap;
+                font-weight: bold;
             }}
             .stats {{
                 margin-top: 12px;
