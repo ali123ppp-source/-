@@ -1714,7 +1714,16 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
 
         rows_html += f'<tr>{cells_html}</tr>'
 
-    headers_html = "".join([f'<th>{h}</th>' for h in headers])
+    def _header_cell_html(h):
+        if "كلي" in h:
+            return f'<th><span class="pill pill-blue">{h}</span></th>'
+        if "مستحق" in h:
+            return f'<th><span class="pill pill-green">{h}</span></th>'
+        if "محجوب" in h:
+            return f'<th><span class="pill pill-red">{h}</span></th>'
+        return f'<th>{h}</th>'
+
+    headers_html = "".join([_header_cell_html(h) for h in headers])
     font_face_css = get_pdf_font_face_css()
     pdf_font_stack = "'Tajawal', 'Segoe UI Semibold', 'Segoe UI', 'Calibri', 'Tahoma', 'Arial', sans-serif"
 
@@ -1727,7 +1736,7 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
             {font_face_css}
             @page {{
                 size: {page_size} {page_orientation};
-                margin: 10mm 8mm;
+                margin: 6mm;
                 @bottom-center {{
                     content: "صفحة " counter(page);
                     font-size: 9pt;
@@ -1741,9 +1750,12 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
                 font-weight: bold;
                 direction: rtl;
                 margin: 0;
-                padding: 0;
+                padding: 10mm 8mm;
+                background-image: radial-gradient(circle, #DCE4F0 1px, transparent 1px);
+                background-size: 16px 16px;
             }}
             .invoice-card {{
+                background-color: #FFFFFF;
                 border: 2.5px solid #1B3A63;
                 border-radius: 20px;
                 overflow: hidden;
@@ -1751,14 +1763,23 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
             .invoice-header {{
                 background-color: #1B3A63;
                 color: #FFFFFF;
-                padding: 12px 20px 10px;
+                padding: 14px 20px 12px;
                 border-bottom: 4px solid #D4AC0D;
             }}
             .invoice-title {{
-                font-size: 15pt;
+                font-size: 19pt;
                 font-weight: 800;
                 letter-spacing: 0.3px;
             }}
+            .pill {{
+                display: inline-block;
+                padding: 3px 12px;
+                border-radius: 999px;
+                font-weight: 800;
+            }}
+            .pill-blue {{ background-color: #D6E9FA; color: #1F618D; }}
+            .pill-green {{ background-color: #D3F3E8; color: #117864; }}
+            .pill-red {{ background-color: #FBD9D3; color: #C0392B; }}
             .invoice-subtitle {{
                 font-size: 9pt;
                 font-weight: normal;
