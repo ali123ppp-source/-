@@ -443,7 +443,7 @@ def build_professional_word_report(df, filename_base, card_choice):
     table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
     table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
     
-    table.rows[0].height = Inches(0.6)
+    table.rows[0].height = Inches(0.75)
     
     max_name_len = max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15)
     dynamic_name_width = Cm(max_name_len * 0.22 + 0.5)
@@ -464,7 +464,7 @@ def build_professional_word_report(df, filename_base, card_choice):
 
     for idx, row in df.iterrows():
         new_row = table.add_row()
-        new_row.height = Inches(0.4)
+        new_row.height = Inches(0.5)
         row_cells = new_row.cells
         table.rows[idx+1]._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
         is_eligible_zero = int(row["مستحق"]) == 0
@@ -507,7 +507,7 @@ def build_professional_word_report_v2(df, filename_base, card_choice):
     table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
     table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
     
-    table.rows[0].height = Inches(0.6)
+    table.rows[0].height = Inches(0.75)
     
     dynamic_name_width = Cm(max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15) * 0.22 + 0.5)
     col_widths = [Cm(0.9), dynamic_name_width, Cm(0.80), Cm(0.80), Cm(0.9), Cm(0.9), Cm(0.9), Cm(1.8), Cm(1.80)]
@@ -525,7 +525,7 @@ def build_professional_word_report_v2(df, filename_base, card_choice):
 
     for idx, row in df.iterrows():
         new_row = table.add_row()
-        new_row.height = Inches(0.4)
+        new_row.height = Inches(0.5)
         row_cells = new_row.cells
         table.rows[idx+1]._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
         is_eligible_zero = int(row["مستحق"]) == 0
@@ -567,7 +567,7 @@ def build_professional_word_report_v3(df, filename_base, card_choice):
     table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
     table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
     
-    table.rows[0].height = Inches(0.6)
+    table.rows[0].height = Inches(0.75)
     
     dynamic_name_width = Cm(max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15) * 0.22 + 0.5)
     col_widths = [Cm(0.9), dynamic_name_width, Cm(1.8), Cm(0.9), Cm(0.9), Cm(0.9), Cm(2.3), Cm(2.3), Cm(2.3), Cm(2.3)]
@@ -585,7 +585,7 @@ def build_professional_word_report_v3(df, filename_base, card_choice):
 
     for idx, row in df.iterrows():
         new_row = table.add_row()
-        new_row.height = Inches(0.4)
+        new_row.height = Inches(0.5)
         row_cells = new_row.cells
         table.rows[idx+1]._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
         is_eligible_zero = int(row["مستحق"]) == 0
@@ -625,7 +625,7 @@ def build_professional_word_report_v4(df, filename_base, card_choice):
     table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
     table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
     
-    table.rows[0].height = Inches(0.6)
+    table.rows[0].height = Inches(0.75)
     
     dynamic_name_width = Cm(max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15) * 0.22 + 0.5)
     col_widths = [Cm(0.9), Cm(1.8), dynamic_name_width, Cm(0.9)] + [Cm(1.05)] * 12
@@ -644,7 +644,7 @@ def build_professional_word_report_v4(df, filename_base, card_choice):
 
     for idx, row in df.iterrows():
         new_row = table.add_row()
-        new_row.height = Inches(0.4)
+        new_row.height = Inches(0.5)
         row_cells = new_row.cells
         table.rows[idx+1]._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
         is_eligible_zero = int(row["مستحق"]) == 0
@@ -686,7 +686,7 @@ def build_professional_word_report_v5(df, filename_base, card_choice):
     table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
     table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
     
-    table.rows[0].height = Inches(0.6)
+    table.rows[0].height = Inches(0.75)
     
     col_widths = [Cm(1.5), Cm(8.0), Cm(3.2), Cm(8.0), Cm(8.0)]
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
@@ -701,7 +701,7 @@ def build_professional_word_report_v5(df, filename_base, card_choice):
             
     for idx, row in df.iterrows():
         new_row = table.add_row()
-        new_row.height = Inches(0.4)
+        new_row.height = Inches(0.5)
         row_cells = new_row.cells
         table.rows[idx+1]._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
         is_eligible_zero = int(row["مستحق"]) == 0
@@ -750,7 +750,7 @@ def build_professional_word_report_v6(df, filename_base, card_choice):
     table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
     table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
     
-    table.rows[0].height = Inches(0.6)
+    table.rows[0].height = Inches(0.75)
     
     dynamic_name_width = Cm(max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15) * 0.22 + 0.5)
     col_widths = [Cm(0.9), Cm(1.8), dynamic_name_width, Cm(1.1)] + [Cm(1.05)] * 12
@@ -769,7 +769,7 @@ def build_professional_word_report_v6(df, filename_base, card_choice):
 
     for idx, row in df.iterrows():
         new_row = table.add_row()
-        new_row.height = Inches(0.4)
+        new_row.height = Inches(0.5)
         row_cells = new_row.cells
         table.rows[idx+1]._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
         is_eligible_zero = int(row["مستحق"]) == 0
@@ -891,7 +891,7 @@ def build_professional_word_report_v7(df, filename_base, card_choice):
     table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
     table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
     
-    table.rows[0].height = Inches(0.6)
+    table.rows[0].height = Inches(0.75)
     
     dynamic_name_width = Cm(max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15) * 0.22 + 0.5)
     # تخصيص مساحات ثابتة للمواد (1.1 سم لكل مادة)
@@ -911,7 +911,7 @@ def build_professional_word_report_v7(df, filename_base, card_choice):
 
     for idx, row in df.iterrows():
         new_row = table.add_row()
-        new_row.height = Inches(0.4)
+        new_row.height = Inches(0.5)
         row_cells = new_row.cells
         table.rows[idx+1]._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
         is_eligible_zero = int(row["مستحق"]) == 0
