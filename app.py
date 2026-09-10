@@ -328,7 +328,8 @@ def _locate_header_row(rows_data):
                 idx_map["محجوب"] = j
             elif "كلي" in c or "اجمالي" in c or "مجموع" in c:
                 idx_map["كلي"] = j
-            elif ("تسلسل" not in c and not any(w in c for w in ["هاتف", "موبايل", "جوال", "تلفون", "فون"])
+            elif ("تسلسل" not in c
+                  and not any(w in c for w in ["هاتف", "موبايل", "جوال", "تلفون", "فون", "ملف", "قيد"])
                   and ("بطاق" in c or "تموين" in c or "رقم" in c)):
                 if "حديث" in c or "جديد" in c:
                     idx_map["بطاقة_حديث"] = j
@@ -376,6 +377,12 @@ def _extract_records_by_headers(rows_data, card_choice, name_length_choice):
         # ("مجموعة سكنية" مثلاً).
         first_word = _strip_diacritics_and_unify_hamza(name_val).split()[0]
         if footer_label_re.fullmatch(first_word):
+            continue
+
+        # عائلة حقيقية تضم فرداً واحداً على الأقل دائماً؛ "الكلي" = 0 يعني عملياً
+        # أن هذا الصف ليس سجل عائلة (كصف توقيع/ملاحظة انزلق من جدول لاحق بالملف
+        # وصادف أن قيمة الاسم فيه بدت كاسم شخص حقيقي).
+        if get_num("كلي") == 0:
             continue
 
         final_name = " ".join(name_val.split()[:take])
@@ -468,7 +475,7 @@ def extract_and_clean_data(file_obj, card_choice, name_length_choice, sort_alpha
                 rows_data.append(cells)
 
     header_records = _extract_records_by_headers(rows_data, card_choice, name_length_choice)
-    if header_records is not None:
+    if header_records:
         warnings = _validate_extracted_records(header_records)
         df = pd.DataFrame(header_records)
         if not df.empty:

@@ -387,6 +387,53 @@ def test_extract_and_clean_data_returns_tuple():
     check("extract_and_clean_data: warnings is a list", isinstance(warnings, list))
 
 
+# ---------------------------------------------------------------------------
+# 8) header_idx تم إيجاده لكن كل صفوف البيانات استُبعدت (تذييل فقط) —
+#    _extract_records_by_headers يُرجع [] لا None، ويجب ألا يُعامَل [] كنتيجة
+#    نهائية تمنع تجربة المحرك الاحتياطي الأقدم.
+# ---------------------------------------------------------------------------
+def test_empty_header_result_is_falsy_not_none():
+    rows_data = [
+        ["ت", "اسم رب الأسرة", "رقم البطاقة", "الكلي", "مستحق", "محجوب"],
+        ["", "الوكيل خالد ياسين", "", "10", "10", "0"],
+    ]
+    records = app._extract_records_by_headers(rows_data, "رقم البطاقة القديم", "الاسم الثلاثي فقط")
+    check("empty_header_result: returns [] (falsy) not None when every row is filtered out",
+          records == [] and records is not None, detail=str(records))
+
+
+# ---------------------------------------------------------------------------
+# 9) صف من جدول لاحق بالملف (مثل توقيع مسؤول) لا يجب أن يُلتقَط كسجل عائلة
+#    وهمي بقيم صفرية — عائلة حقيقية تضم فرداً واحداً على الأقل دائماً.
+# ---------------------------------------------------------------------------
+def test_trailing_signature_row_not_captured_as_bogus_record():
+    rows_data = [
+        ["ت", "اسم رب الأسرة", "رقم البطاقة", "الكلي", "مستحق", "محجوب"],
+        ["1", "زينب عباس كاظم", "1234567", "6", "6", "0"],
+        ["توقيع المسؤول", "احمد علي", "", "", "", ""],
+    ]
+    records = app._extract_records_by_headers(rows_data, "رقم البطاقة القديم", "الاسم الثلاثي فقط")
+    check("trailing_signature: only the one real family record extracted",
+          records is not None and len(records) == 1 and records[0]["اسم رب الأسرة"] == "زينب عباس كاظم",
+          detail=str(records))
+
+
+# ---------------------------------------------------------------------------
+# 10) عمود "رقم الملف" يجب ألا يُعامَل كعمود بطاقة عندما يسبق عمود البطاقة الحقيقي.
+# ---------------------------------------------------------------------------
+def test_file_number_column_not_treated_as_card():
+    rows_data = [
+        ["ت", "اسم رب الأسرة", "رقم الملف", "رقم البطاقة", "الكلي", "مستحق", "محجوب"],
+        ["1", "خالد حسن فرج", "555", "9988776", "3", "3", "0"],
+    ]
+    header_idx, idx_map = app._locate_header_row(rows_data)
+    check("file_number_column: 'رقم الملف' not mistaken for the card column",
+          idx_map["بطاقة_قديم"] == 3, detail=str(idx_map))
+    records = app._extract_records_by_headers(rows_data, "رقم البطاقة القديم", "الاسم الثلاثي فقط")
+    check("file_number_column: extracted card is the real card, not the file number",
+          records is not None and records[0]["رقم البطاقة"] == "9988776", detail=str(records))
+
+
 def main():
     tests = [
         test_real_world_layout_with_blank_column,
@@ -408,6 +455,9 @@ def main():
         test_validator_silent_on_clean_data,
         test_no_matching_header_returns_none,
         test_extract_and_clean_data_returns_tuple,
+        test_empty_header_result_is_falsy_not_none,
+        test_trailing_signature_row_not_captured_as_bogus_record,
+        test_file_number_column_not_treated_as_card,
     ]
     for t in tests:
         try:
