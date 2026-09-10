@@ -37,8 +37,8 @@ st.markdown("<h1 style='text-align: right;'>نظام تنسيق وتدقيق ك�
 
 if "processing_done" not in st.session_state:
     st.session_state.processing_done = False
-    st.session_state.df_final = None
-    st.session_state.output_filename = ""
+    st.session_state.results = []
+    st.session_state.uploaded_filenames = []
     st.session_state.selected_card = ""
     st.session_state.template_choice = ""
     st.session_state.name_choice = ""
@@ -1072,7 +1072,7 @@ def build_pdf_report(df, filename_base, card_choice, template_choice):
 # واجهة استخدام التطبيق (Streamlit Interface)
 # -----------------------------------------------------------------------------
 st.markdown("<h3 style='text-align: right;'>📂 رفع الكشف المراد تدقيقه وتنسيقه للمطبعة</h3>", unsafe_allow_html=True)
-uploaded_files = st.file_uploader("ارفع كشف الوكلاء (يمكنك رفع ملف أو أكثر لدمجهم سوياً)", type=['docx', 'xlsx'], accept_multiple_files=True, key="doc_input_v8", label_visibility="collapsed")
+uploaded_files = st.file_uploader("ارفع كشف الوكلاء (يمكنك رفع أكثر من ملف، وكل ملف يُعالج ويُصدَّر بشكل منفصل)", type=['docx', 'xlsx'], accept_multiple_files=True, key="doc_input_v8", label_visibility="collapsed")
 
 st.markdown("<br>", unsafe_allow_html=True)
 
@@ -1121,8 +1121,8 @@ sort_alphabetically = (sort_choice == "ترتيب أبجدي بحسب الاسم
 st.markdown("<br>", unsafe_allow_html=True)
 
 if uploaded_files:
-    current_filename = " و ".join([f.name.rsplit('.', 1)[0] for f in uploaded_files])
-    if (st.session_state.output_filename != current_filename or
+    current_filenames = [f.name for f in uploaded_files]
+    if (st.session_state.uploaded_filenames != current_filenames or
         st.session_state.selected_card != selected_card or
         st.session_state.template_choice != template_choice or
         st.session_state.name_choice != name_length_choice or
@@ -1131,27 +1131,18 @@ if uploaded_files:
 
 if st.button("⚙️ تشغيل محرك التنظيم والتنسيق المتقدم الكلي"):
     if uploaded_files:
-        spinner_msg = 'جاري معالجة وترتيب القيود أبجدياً وإعداد التنسيق الشرطي والمقاييس...' if sort_alphabetically else 'جاري معالجة القيود (بترتيب الملف الأصلي) وإعداد التنسيق الشرطي والمقاييس...'
+        spinner_msg = 'جاري معالجة وترتيب القيود أبجدياً وإعداد التنسيق الشرطي والمقاييس لكل ملف على حدة...' if sort_alphabetically else 'جاري معالجة القيود (بترتيب الملف الأصلي) لكل ملف على حدة...'
         with st.spinner(spinner_msg):
             try:
-                all_extracted_dfs = []
+                results = []
                 for f in uploaded_files:
                     df_res = extract_and_clean_data(f, selected_card, name_length_choice, sort_alphabetically)
                     if not df_res.empty:
-                        all_extracted_dfs.append(df_res)
+                        results.append({"filename": f.name.rsplit('.', 1)[0], "df": df_res})
 
-                if all_extracted_dfs:
-                    merged_df = pd.concat(all_extracted_dfs, ignore_index=True)
-                    if sort_alphabetically:
-                        merged_df = merged_df.sort_values(by="اسم رب الأسرة").reset_index(drop=True)
-                    merged_df["ت"] = merged_df.index + 1
-
-                    st.session_state.df_final = merged_df
-                    if len(uploaded_files) > 1:
-                        st.session_state.output_filename = "مدمج_" + "_".join([f.name.rsplit('.', 1)[0][:10] for f in uploaded_files])
-                    else:
-                        st.session_state.output_filename = uploaded_files[0].name.rsplit('.', 1)[0]
-
+                if results:
+                    st.session_state.results = results
+                    st.session_state.uploaded_filenames = [f.name for f in uploaded_files]
                     st.session_state.selected_card = selected_card
                     st.session_state.template_choice = template_choice
                     st.session_state.name_choice = name_length_choice
@@ -1165,52 +1156,61 @@ if st.button("⚙️ تشغيل محرك التنظيم والتنسيق الم�
         st.warning("الرجاء رفع ملف docx أو xlsx أولاً.")
 
 if st.session_state.processing_done:
-    df_final = st.session_state.df_final
-    output_filename = st.session_state.output_filename
     used_card_type = st.session_state.selected_card
     used_template = st.session_state.template_choice
     order_note = "أبجدياً" if st.session_state.sort_choice == "ترتيب أبجدي بحسب الاسم" else "بترتيب الملف الأصلي"
-    st.success(f"✅ تم الدمج والتنظيم بنجاح ({order_note}) لـ ({len(df_final)}) قيد اسم.")
-    
-    with st.spinner('جاري صياغة وهيكلة مستندات Word و PDF المكتملة...'):
-        if used_template == "النموذج الأول (الأصلي المطور)":
-            word_output = build_professional_word_report(df_final, output_filename, used_card_type)
-        elif used_template == "النموذج الثاني (حجم 14 وحقلين فارغين)":
-            word_output = build_professional_word_report_v2(df_final, output_filename, used_card_type)
-        elif used_template == "النموذج الثالث (خط 16، عناوين 12، 4 أشهر)":
-            word_output = build_professional_word_report_v3(df_final, output_filename, used_card_type)
-        elif used_template == "النموذج الرابع (12 سلة، العدد الكلي)":
-            word_output = build_professional_word_report_v4(df_final, output_filename, used_card_type)
-        elif used_template == "النموذج السادس (12 سلة، العدد المستحق)":
-            word_output = build_professional_word_report_v6(df_final, output_filename, used_card_type)
-        elif used_template == "النموذج السابع (تفصيل المواد الغذائية)":
-            word_output = build_professional_word_report_v7(df_final, output_filename, used_card_type)
-        else:
-            word_output = build_professional_word_report_v5(df_final, output_filename, used_card_type)
+    results = st.session_state.results
 
-    # عرض خيارات التحميل جنباً إلى جنب (Word و PDF)
-    st.markdown("### 📥 خيارات التحميل الفوري:")
-    dl_col1, dl_col2 = st.columns(2)
-    
-    with dl_col1:
-        st.download_button(
-            label="📄 تحميل الكشف المنسق (Word)",
-            data=word_output,
-            file_name=f"كشف_منسق_جاهز_{output_filename}.docx",
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        )
-        
-    with dl_col2:
-        if PDFKIT_AVAILABLE or WEASYPRINT_AVAILABLE:
-            try:
-                pdf_output = build_pdf_report(df_final, output_filename, used_card_type, used_template)
-                st.download_button(
-                    label="📕 تحميل الكشف المنسق (PDF جاهز للطباعة)",
-                    data=pdf_output,
-                    file_name=f"كشف_منسق_جاهز_{output_filename}.pdf",
-                    mime="application/pdf",
-                )
-            except Exception as e:
-                st.error(f"حدث خطأ أثناء إعداد PDF: {e}")
+    st.success(f"✅ تمت معالجة {len(results)} ملف بنجاح (كل ملف بشكل منفصل، {order_note}).")
+
+    def build_word_for_template(df_final, output_filename, used_card_type, used_template):
+        if used_template == "النموذج الأول (الأصلي المطور)":
+            return build_professional_word_report(df_final, output_filename, used_card_type)
+        elif used_template == "النموذج الثاني (حجم 14 وحقلين فارغين)":
+            return build_professional_word_report_v2(df_final, output_filename, used_card_type)
+        elif used_template == "النموذج الثالث (خط 16، عناوين 12، 4 أشهر)":
+            return build_professional_word_report_v3(df_final, output_filename, used_card_type)
+        elif used_template == "النموذج الرابع (12 سلة، العدد الكلي)":
+            return build_professional_word_report_v4(df_final, output_filename, used_card_type)
+        elif used_template == "النموذج السادس (12 سلة، العدد المستحق)":
+            return build_professional_word_report_v6(df_final, output_filename, used_card_type)
+        elif used_template == "النموذج السابع (تفصيل المواد الغذائية)":
+            return build_professional_word_report_v7(df_final, output_filename, used_card_type)
         else:
-            st.warning("⚠️ يرجى تثبيت مكتبة `pdfkit` أو `weasyprint` لتفعيل خاصية تحميل PDF.")
+            return build_professional_word_report_v5(df_final, output_filename, used_card_type)
+
+    for idx, item in enumerate(results):
+        df_final = item["df"]
+        output_filename = item["filename"]
+
+        st.markdown(f"---\n#### 📄 {output_filename} — ({len(df_final)}) قيد اسم")
+
+        with st.spinner(f'جاري صياغة وهيكلة مستندات Word و PDF لملف "{output_filename}"...'):
+            word_output = build_word_for_template(df_final, output_filename, used_card_type, used_template)
+
+        dl_col1, dl_col2 = st.columns(2)
+
+        with dl_col1:
+            st.download_button(
+                label="📄 تحميل الكشف المنسق (Word)",
+                data=word_output,
+                file_name=f"كشف_منسق_جاهز_{output_filename}.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                key=f"word_dl_{idx}",
+            )
+
+        with dl_col2:
+            if PDFKIT_AVAILABLE or WEASYPRINT_AVAILABLE:
+                try:
+                    pdf_output = build_pdf_report(df_final, output_filename, used_card_type, used_template)
+                    st.download_button(
+                        label="📕 تحميل الكشف المنسق (PDF جاهز للطباعة)",
+                        data=pdf_output,
+                        file_name=f"كشف_منسق_جاهز_{output_filename}.pdf",
+                        mime="application/pdf",
+                        key=f"pdf_dl_{idx}",
+                    )
+                except Exception as e:
+                    st.error(f"حدث خطأ أثناء إعداد PDF لملف \"{output_filename}\": {e}")
+            else:
+                st.warning("⚠️ يرجى تثبيت مكتبة `pdfkit` أو `weasyprint` لتفعيل خاصية تحميل PDF.")
