@@ -8,6 +8,8 @@ from docx.shared import Cm, Pt, RGBColor, Inches
 from docx.oxml import parse_xml, OxmlElement
 from docx.oxml.ns import nsdecls, qn
 import re
+import os
+from datetime import datetime
 
 # تم تعديل الاستثناء هنا ليتجاهل خطأ OSError تماماً بدلاً من توقف التطبيق
 try:
@@ -34,6 +36,46 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown("<h1 style='text-align: right;'>نظام تنسيق وتدقيق كشوفات الوكلاء المطور 📄💎</h1>", unsafe_allow_html=True)
+
+# -----------------------------------------------------------------------------
+# سجل الملفات المعالجة (لعرضها لاحقاً كجدول ديناميكي، الأحدث أولاً)
+# -----------------------------------------------------------------------------
+PROCESSING_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "processing_log.csv")
+LOG_COLUMNS = ["التاريخ والوقت", "اسم الملف", "عدد القيود", "نوع البطاقة", "طول الاسم", "القالب المستخدم", "ترتيب البيانات"]
+
+def log_processed_file(filename, record_count, card_choice, name_length_choice, template_choice, sort_choice):
+    entry = pd.DataFrame([{
+        "التاريخ والوقت": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "اسم الملف": filename,
+        "عدد القيود": record_count,
+        "نوع البطاقة": card_choice,
+        "طول الاسم": name_length_choice,
+        "القالب المستخدم": template_choice,
+        "ترتيب البيانات": sort_choice,
+    }])
+    header = not os.path.exists(PROCESSING_LOG_PATH)
+    try:
+        entry.to_csv(PROCESSING_LOG_PATH, mode='a', header=header, index=False, encoding='utf-8-sig')
+    except Exception:
+        pass  # تسجيل السجل ثانوي؛ لا يجب أن يوقف معالجة الملف الأساسية
+
+def load_processing_log():
+    if not os.path.exists(PROCESSING_LOG_PATH):
+        return pd.DataFrame(columns=LOG_COLUMNS)
+    try:
+        log_df = pd.read_csv(PROCESSING_LOG_PATH, encoding='utf-8-sig')
+    except Exception:
+        return pd.DataFrame(columns=LOG_COLUMNS)
+    log_df["_ts"] = pd.to_datetime(log_df["التاريخ والوقت"], errors='coerce')
+    log_df = log_df.sort_values(by="_ts", ascending=False).drop(columns="_ts").reset_index(drop=True)
+    return log_df
+
+with st.expander("🕘 سجل الملفات المعالجة سابقاً (الأحدث أولاً)"):
+    log_df = load_processing_log()
+    if log_df.empty:
+        st.info("لا يوجد أي ملفات تمت معالجتها بعد.")
+    else:
+        st.dataframe(log_df, use_container_width=True, hide_index=True)
 
 if "processing_done" not in st.session_state:
     st.session_state.processing_done = False
@@ -1139,6 +1181,7 @@ if st.button("⚙️ تشغيل محرك التنظيم والتنسيق الم�
                     df_res = extract_and_clean_data(f, selected_card, name_length_choice, sort_alphabetically)
                     if not df_res.empty:
                         results.append({"filename": f.name.rsplit('.', 1)[0], "df": df_res})
+                        log_processed_file(f.name, len(df_res), selected_card, name_length_choice, template_choice, sort_choice)
 
                 if results:
                     st.session_state.results = results
