@@ -93,6 +93,24 @@ def test_real_world_layout_with_blank_column():
 
 
 # ---------------------------------------------------------------------------
+# 1ب) عناوين أعمدة طويلة واقعية (أطول من 30 حرفاً) يجب ألا تُرفَض كترويسة —
+#     الترويسات الرسمية العراقية كثيراً ما تكون مطوّلة ووصفية.
+# ---------------------------------------------------------------------------
+def test_long_realistic_header_labels_not_rejected():
+    rows_data = [
+        ["ت", "اسم رب الأسرة", "رقم البطاقة التموينية القديمة",
+         "رقم البطاقة التموينية الجديدة (الحديثة)", "الكلي", "مستحق", "محجوب"],
+        ["1", "زينب عباس كاظم", "1234567", "7654321", "6", "6", "0"],
+    ]
+    header_idx, idx_map = app._locate_header_row(rows_data)
+    check("long_headers: header row found despite long column titles",
+          header_idx == 0, detail=str(idx_map))
+    required = ["اسم", "كلي", "مستحق", "محجوب"]
+    check("long_headers: all required fields mapped", all(idx_map[k] != -1 for k in required),
+          detail=str(idx_map))
+
+
+# ---------------------------------------------------------------------------
 # 2) مرادف جديد لعمود "الكلي": "مجموع" بدل "كلي"/"اجمالي".
 # ---------------------------------------------------------------------------
 def test_total_column_synonym_majmoo():
@@ -354,6 +372,7 @@ def test_extract_and_clean_data_returns_tuple():
 def main():
     tests = [
         test_real_world_layout_with_blank_column,
+        test_long_realistic_header_labels_not_rejected,
         test_total_column_synonym_majmoo,
         test_majmoo_does_not_shadow_mustahiq_or_mahjoob,
         test_sequence_number_column_not_treated_as_card,
