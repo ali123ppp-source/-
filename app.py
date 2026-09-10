@@ -300,19 +300,18 @@ def _extract_records_by_headers(rows_data, card_choice, name_length_choice):
         old_card = ''.join(filter(str.isdigit, get_val("بطاقة_قديم")))
         new_card = ''.join(filter(str.isdigit, get_val("بطاقة_حديث")))
 
+        card_fields = {}
         if card_choice == "رقم البطاقة الحديث":
-            selected_card_num = new_card or old_card
+            card_fields["رقم البطاقة"] = new_card or old_card
         elif card_choice == "القديم والحديث":
-            if old_card and new_card and old_card != new_card:
-                selected_card_num = f"{old_card} / {new_card}"
-            else:
-                selected_card_num = old_card or new_card
+            card_fields["رقم البطاقة القديم"] = old_card
+            card_fields["رقم البطاقة الحديث"] = new_card
         else:
-            selected_card_num = old_card or new_card
+            card_fields["رقم البطاقة"] = old_card or new_card
 
         records.append({
             "اسم رب الأسرة": final_name,
-            "رقم البطاقة": selected_card_num,
+            **card_fields,
             "الكلي": get_num("كلي"),
             "محجوب": get_num("محجوب"),
             "مستحق": get_num("مستحق"),
@@ -378,16 +377,15 @@ def extract_and_clean_data(file_obj, card_choice, name_length_choice, sort_alpha
         
         old_card_num = cells[card_indices[0]]
         new_card_num = cells[card_indices[1]] if len(card_indices) > 1 else old_card_num
-        
+
+        card_fields = {}
         if card_choice == "رقم البطاقة الحديث":
-            selected_card_num = new_card_num
+            card_fields["رقم البطاقة"] = new_card_num
         elif card_choice == "القديم والحديث":
-            if old_card_num != new_card_num:
-                selected_card_num = f"{old_card_num} / {new_card_num}"
-            else:
-                selected_card_num = old_card_num
+            card_fields["رقم البطاقة القديم"] = old_card_num
+            card_fields["رقم البطاقة الحديث"] = new_card_num
         else:
-            selected_card_num = old_card_num
+            card_fields["رقم البطاقة"] = old_card_num
 
         digit_cells = [int(cells[i]) for i in range(name_idx) if cells[i].isdigit()]
         if len(digit_cells) >= 3:
@@ -407,7 +405,7 @@ def extract_and_clean_data(file_obj, card_choice, name_length_choice, sort_alpha
             
         raw_records.append({
             "اسم رب الأسرة": final_name,
-            "رقم البطاقة": selected_card_num,
+            **card_fields,
             "الكلي": total,
             "محجوب": withheld,
             "مستحق": eligible
@@ -436,31 +434,56 @@ def build_professional_word_report(df, filename_base, card_choice):
     title_run = title_p.add_run(f"الكشف الإحصائي المنسق للوكيل: {clean_name}")
     title_run.font.name, title_run.font.size, title_run.bold = "Segoe UI Semibold", Pt(14), True
     
-    headers = ["ت", "اسم رب الأسرة", "حقل فارغ", "الكلي", "مستحق", "محجوب", card_choice, "ملاحظات"]
-    table = doc.add_table(rows=1, cols=8)
-    table.style, table.alignment = 'Table Grid', WD_TABLE_ALIGNMENT.CENTER
-    set_table_borders(table, color_hex="2A4B7C")
-    table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
-    table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
-    
-    table.rows[0].height = Inches(0.75)
-    
+    is_combined = card_choice == "القديم والحديث"
+    orig_headers = ["ت", "اسم رب الأسرة", "حقل فارغ", "الكلي", "مستحق", "محجوب", card_choice, "ملاحظات"]
     max_name_len = max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15)
     dynamic_name_width = Cm(max_name_len * 0.22 + 0.5)
     col_widths = [Cm(0.9), dynamic_name_width, Cm(0.44), Cm(0.9), Cm(0.9), Cm(0.9), Cm(1.8), Inches(1.0)]
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
+    remaining_indices = [1, 2, 3, 4, 5, 7] if is_combined else None
 
-    for i, title in enumerate(headers):
-        cell = table.rows[0].cells[i]
-        cell.width = col_widths[i]
-        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-        if i in [3, 4, 5]:
-            set_cell_vertical_text(cell)
-            format_cell_advanced(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="center", color_rgb=COLOR_NAVY_BLUE)
-        elif i == 6:
-            format_header_cell_two_lines(cell, title, bold=True, size_pt=14, font_name="Segoe UI Semibold", color_rgb=COLOR_NAVY_BLUE)
-        else:
-            format_cell_advanced(cell, title, bold=True, size_pt=14, font_name="Segoe UI Semibold", align="left" if i==1 else "center", color_rgb=COLOR_NAVY_BLUE)
+    headers = (["ت", "القديم", "الحديث"] + [orig_headers[i] for i in remaining_indices]) if is_combined else orig_headers
+    table = doc.add_table(rows=1, cols=len(headers))
+    table.style, table.alignment = 'Table Grid', WD_TABLE_ALIGNMENT.CENTER
+    set_table_borders(table, color_hex="2A4B7C")
+    table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
+    table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
+
+    table.rows[0].height = Inches(0.75)
+
+    if is_combined:
+        hdr_cells = table.rows[0].cells
+        cell = hdr_cells[0]
+        cell.width, cell.vertical_alignment = col_widths[0], WD_ALIGN_VERTICAL.CENTER
+        format_cell_advanced(cell, "ت", bold=True, size_pt=14, font_name="Segoe UI Semibold", align="center", color_rgb=COLOR_NAVY_BLUE)
+        j = 1
+        for label in ["القديم", "الحديث"]:
+            cell = hdr_cells[j]
+            cell.width, cell.vertical_alignment = Cm(1.8), WD_ALIGN_VERTICAL.CENTER
+            format_cell_advanced(cell, label, bold=True, size_pt=14, font_name="Segoe UI Semibold", align="center", color_rgb=COLOR_NAVY_BLUE)
+            j += 1
+        for i in remaining_indices:
+            cell = hdr_cells[j]
+            cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
+            title = orig_headers[i]
+            if i in [3, 4, 5]:
+                set_cell_vertical_text(cell)
+                format_cell_advanced(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="center", color_rgb=COLOR_NAVY_BLUE)
+            else:
+                format_cell_advanced(cell, title, bold=True, size_pt=14, font_name="Segoe UI Semibold", align="left" if i==1 else "center", color_rgb=COLOR_NAVY_BLUE)
+            j += 1
+    else:
+        for i, title in enumerate(headers):
+            cell = table.rows[0].cells[i]
+            cell.width = col_widths[i]
+            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+            if i in [3, 4, 5]:
+                set_cell_vertical_text(cell)
+                format_cell_advanced(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="center", color_rgb=COLOR_NAVY_BLUE)
+            elif i == 6:
+                format_header_cell_two_lines(cell, title, bold=True, size_pt=14, font_name="Segoe UI Semibold", color_rgb=COLOR_NAVY_BLUE)
+            else:
+                format_cell_advanced(cell, title, bold=True, size_pt=14, font_name="Segoe UI Semibold", align="left" if i==1 else "center", color_rgb=COLOR_NAVY_BLUE)
 
     for idx, row in df.iterrows():
         new_row = table.add_row()
@@ -468,25 +491,56 @@ def build_professional_word_report(df, filename_base, card_choice):
         row_cells = new_row.cells
         table.rows[idx+1]._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
         is_eligible_zero = int(row["مستحق"]) == 0
-        set_cell_no_wrap(row_cells[1])
 
-        for i in range(8):
-            cell = row_cells[i]
-            cell.width = col_widths[i]
-            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-            val = row["ت"] if i==0 else row["اسم رب الأسرة"] if i==1 else "x" if i==2 and is_eligible_zero else "" if i==2 else row["الكلي"] if i==3 else row["مستحق"] if i==4 else row["محجوب"] if i==5 else row["رقم البطاقة"] if i==6 else "محجوب" if i==7 and is_eligible_zero else ""
-            font_size = 14 if i==5 else 12 if i==7 and is_eligible_zero else 16
-            text_color = RGBColor(203, 67, 53) if i==7 and is_eligible_zero else None
-            if i == 1:
-                format_name_cell_with_small_suffix(cell, val, base_size=16, small_size=10, font_name="Calibri", color_rgb=text_color, align="left")
-            else:
-                format_cell_advanced(cell, val, size_pt=font_size, font_name="Calibri", color_rgb=text_color, align="left" if i==1 else "center")
+        if is_combined:
+            cell = row_cells[0]
+            cell.width, cell.vertical_alignment = col_widths[0], WD_ALIGN_VERTICAL.CENTER
+            format_cell_advanced(cell, row["ت"], size_pt=16, font_name="Calibri", align="center")
             if is_eligible_zero: set_cell_background(cell, "EC7063")
-            else:
-                if i==0: set_cell_background(cell, "D4E6F1")
-                elif i==3: set_cell_background(cell, "EBF5FB")
-                elif i==4: set_cell_background(cell, "E8F8F5")
-                elif i==5: set_cell_background(cell, "FADBD8")
+            else: set_cell_background(cell, "D4E6F1")
+            j = 1
+            for card_key in ["رقم البطاقة القديم", "رقم البطاقة الحديث"]:
+                cell = row_cells[j]
+                cell.width, cell.vertical_alignment = Cm(1.8), WD_ALIGN_VERTICAL.CENTER
+                format_cell_advanced(cell, row[card_key], size_pt=16, font_name="Calibri", align="center")
+                if is_eligible_zero: set_cell_background(cell, "EC7063")
+                j += 1
+            for i in remaining_indices:
+                cell = row_cells[j]
+                cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
+                if i == 1: set_cell_no_wrap(cell)
+                val = row["ت"] if i==0 else row["اسم رب الأسرة"] if i==1 else "x" if i==2 and is_eligible_zero else "" if i==2 else row["الكلي"] if i==3 else row["مستحق"] if i==4 else row["محجوب"] if i==5 else row["رقم البطاقة"] if i==6 else "محجوب" if i==7 and is_eligible_zero else ""
+                font_size = 14 if i==5 else 12 if i==7 and is_eligible_zero else 16
+                text_color = RGBColor(203, 67, 53) if i==7 and is_eligible_zero else None
+                if i == 1:
+                    format_name_cell_with_small_suffix(cell, val, base_size=16, small_size=10, font_name="Calibri", color_rgb=text_color, align="left")
+                else:
+                    format_cell_advanced(cell, val, size_pt=font_size, font_name="Calibri", color_rgb=text_color, align="left" if i==1 else "center")
+                if is_eligible_zero: set_cell_background(cell, "EC7063")
+                else:
+                    if i==3: set_cell_background(cell, "EBF5FB")
+                    elif i==4: set_cell_background(cell, "E8F8F5")
+                    elif i==5: set_cell_background(cell, "FADBD8")
+                j += 1
+        else:
+            set_cell_no_wrap(row_cells[1])
+            for i in range(8):
+                cell = row_cells[i]
+                cell.width = col_widths[i]
+                cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+                val = row["ت"] if i==0 else row["اسم رب الأسرة"] if i==1 else "x" if i==2 and is_eligible_zero else "" if i==2 else row["الكلي"] if i==3 else row["مستحق"] if i==4 else row["محجوب"] if i==5 else row["رقم البطاقة"] if i==6 else "محجوب" if i==7 and is_eligible_zero else ""
+                font_size = 14 if i==5 else 12 if i==7 and is_eligible_zero else 16
+                text_color = RGBColor(203, 67, 53) if i==7 and is_eligible_zero else None
+                if i == 1:
+                    format_name_cell_with_small_suffix(cell, val, base_size=16, small_size=10, font_name="Calibri", color_rgb=text_color, align="left")
+                else:
+                    format_cell_advanced(cell, val, size_pt=font_size, font_name="Calibri", color_rgb=text_color, align="left" if i==1 else "center")
+                if is_eligible_zero: set_cell_background(cell, "EC7063")
+                else:
+                    if i==0: set_cell_background(cell, "D4E6F1")
+                    elif i==3: set_cell_background(cell, "EBF5FB")
+                    elif i==4: set_cell_background(cell, "E8F8F5")
+                    elif i==5: set_cell_background(cell, "FADBD8")
     return save_doc_buffer(doc, df)
 
 def build_professional_word_report_v2(df, filename_base, card_choice):
@@ -500,28 +554,50 @@ def build_professional_word_report_v2(df, filename_base, card_choice):
     title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     title_run = title_p.add_run(f"الكشف الإحصائي المنسق للوكيل: {clean_name}")
     title_run.font.name, title_run.font.size, title_run.bold = "Segoe UI Semibold", Pt(14), True
-    headers = ["ت", "اسم رب الأسرة", "حقل فارغ 1", "حقل فارغ 2", "الكلي", "مستحق", "محجوب", card_choice, "ملاحظات"]
-    table = doc.add_table(rows=1, cols=9)
+    is_combined = card_choice == "القديم والحديث"
+    orig_headers = ["ت", "اسم رب الأسرة", "حقل فارغ 1", "حقل فارغ 2", "الكلي", "مستحق", "محجوب", card_choice, "ملاحظات"]
+    dynamic_name_width = Cm(max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15) * 0.22 + 0.5)
+    col_widths = [Cm(0.9), dynamic_name_width, Cm(0.80), Cm(0.80), Cm(0.9), Cm(0.9), Cm(0.9), Cm(1.8), Cm(1.80)]
+    COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
+    remaining_indices = [1, 2, 3, 4, 5, 6, 8] if is_combined else None
+
+    headers = (["ت", "القديم", "الحديث"] + [orig_headers[i] for i in remaining_indices]) if is_combined else orig_headers
+    table = doc.add_table(rows=1, cols=len(headers))
     table.style, table.alignment = 'Table Grid', WD_TABLE_ALIGNMENT.CENTER
     set_table_borders(table, "2A4B7C")
     table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
     table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
-    
-    table.rows[0].height = Inches(0.75)
-    
-    dynamic_name_width = Cm(max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15) * 0.22 + 0.5)
-    col_widths = [Cm(0.9), dynamic_name_width, Cm(0.80), Cm(0.80), Cm(0.9), Cm(0.9), Cm(0.9), Cm(1.8), Cm(1.80)]
-    COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
 
-    for i, title in enumerate(headers):
-        cell = table.rows[0].cells[i]
-        cell.width = col_widths[i]
-        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-        if i in [4, 5, 6]: set_cell_vertical_text(cell)
-        if i == 7:
-            format_header_cell_two_lines(cell, title, bold=True, size_pt=14, font_name="Segoe UI Semibold", color_rgb=COLOR_NAVY_BLUE)
-        else:
+    table.rows[0].height = Inches(0.75)
+
+    if is_combined:
+        hdr_cells = table.rows[0].cells
+        cell = hdr_cells[0]
+        cell.width, cell.vertical_alignment = col_widths[0], WD_ALIGN_VERTICAL.CENTER
+        format_cell_advanced(cell, "ت", bold=True, size_pt=14, font_name="Segoe UI Semibold", align="center", color_rgb=COLOR_NAVY_BLUE)
+        j = 1
+        for label in ["القديم", "الحديث"]:
+            cell = hdr_cells[j]
+            cell.width, cell.vertical_alignment = Cm(1.8), WD_ALIGN_VERTICAL.CENTER
+            format_cell_advanced(cell, label, bold=True, size_pt=14, font_name="Segoe UI Semibold", align="center", color_rgb=COLOR_NAVY_BLUE)
+            j += 1
+        for i in remaining_indices:
+            cell = hdr_cells[j]
+            cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
+            title = orig_headers[i]
+            if i in [4, 5, 6]: set_cell_vertical_text(cell)
             format_cell_advanced(cell, title, bold=True, size_pt=14, font_name="Segoe UI Semibold", align="left" if i==1 else "center", color_rgb=COLOR_NAVY_BLUE)
+            j += 1
+    else:
+        for i, title in enumerate(headers):
+            cell = table.rows[0].cells[i]
+            cell.width = col_widths[i]
+            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+            if i in [4, 5, 6]: set_cell_vertical_text(cell)
+            if i == 7:
+                format_header_cell_two_lines(cell, title, bold=True, size_pt=14, font_name="Segoe UI Semibold", color_rgb=COLOR_NAVY_BLUE)
+            else:
+                format_cell_advanced(cell, title, bold=True, size_pt=14, font_name="Segoe UI Semibold", align="left" if i==1 else "center", color_rgb=COLOR_NAVY_BLUE)
 
     for idx, row in df.iterrows():
         new_row = table.add_row()
@@ -529,24 +605,54 @@ def build_professional_word_report_v2(df, filename_base, card_choice):
         row_cells = new_row.cells
         table.rows[idx+1]._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
         is_eligible_zero = int(row["مستحق"]) == 0
-        set_cell_no_wrap(row_cells[1])
 
-        for i in range(9):
-            cell = row_cells[i]
-            cell.width = col_widths[i]
-            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-            val = row["ت"] if i==0 else row["اسم رب الأسرة"] if i==1 else "x" if i in [2,3] and is_eligible_zero else "" if i in [2,3] else row["الكلي"] if i==4 else row["مستحق"] if i==5 else row["محجوب"] if i==6 else row["رقم البطاقة"] if i==7 else "محجوب" if i==8 and is_eligible_zero else ""
-            text_color = RGBColor(203, 67, 53) if i==8 and is_eligible_zero else None
-            if i == 1:
-                format_name_cell_with_small_suffix(cell, val, base_size=14, small_size=10, font_name="Calibri", color_rgb=text_color, align="left")
-            else:
-                format_cell_advanced(cell, val, size_pt=14, font_name="Calibri", color_rgb=text_color, align="left" if i==1 else "center")
+        if is_combined:
+            cell = row_cells[0]
+            cell.width, cell.vertical_alignment = col_widths[0], WD_ALIGN_VERTICAL.CENTER
+            format_cell_advanced(cell, row["ت"], size_pt=14, font_name="Calibri", align="center")
             if is_eligible_zero: set_cell_background(cell, "EC7063")
-            else:
-                if i==0: set_cell_background(cell, "D4E6F1")
-                elif i==4: set_cell_background(cell, "EBF5FB")
-                elif i==5: set_cell_background(cell, "E8F8F5")
-            if i==6: set_cell_background(cell, "E5E7E9")
+            else: set_cell_background(cell, "D4E6F1")
+            j = 1
+            for card_key in ["رقم البطاقة القديم", "رقم البطاقة الحديث"]:
+                cell = row_cells[j]
+                cell.width, cell.vertical_alignment = Cm(1.8), WD_ALIGN_VERTICAL.CENTER
+                format_cell_advanced(cell, row[card_key], size_pt=14, font_name="Calibri", align="center")
+                if is_eligible_zero: set_cell_background(cell, "EC7063")
+                j += 1
+            for i in remaining_indices:
+                cell = row_cells[j]
+                cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
+                if i == 1: set_cell_no_wrap(cell)
+                val = row["ت"] if i==0 else row["اسم رب الأسرة"] if i==1 else "x" if i in [2,3] and is_eligible_zero else "" if i in [2,3] else row["الكلي"] if i==4 else row["مستحق"] if i==5 else row["محجوب"] if i==6 else row["رقم البطاقة"] if i==7 else "محجوب" if i==8 and is_eligible_zero else ""
+                text_color = RGBColor(203, 67, 53) if i==8 and is_eligible_zero else None
+                if i == 1:
+                    format_name_cell_with_small_suffix(cell, val, base_size=14, small_size=10, font_name="Calibri", color_rgb=text_color, align="left")
+                else:
+                    format_cell_advanced(cell, val, size_pt=14, font_name="Calibri", color_rgb=text_color, align="left" if i==1 else "center")
+                if is_eligible_zero: set_cell_background(cell, "EC7063")
+                else:
+                    if i==4: set_cell_background(cell, "EBF5FB")
+                    elif i==5: set_cell_background(cell, "E8F8F5")
+                if i==6: set_cell_background(cell, "E5E7E9")
+                j += 1
+        else:
+            set_cell_no_wrap(row_cells[1])
+            for i in range(9):
+                cell = row_cells[i]
+                cell.width = col_widths[i]
+                cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+                val = row["ت"] if i==0 else row["اسم رب الأسرة"] if i==1 else "x" if i in [2,3] and is_eligible_zero else "" if i in [2,3] else row["الكلي"] if i==4 else row["مستحق"] if i==5 else row["محجوب"] if i==6 else row["رقم البطاقة"] if i==7 else "محجوب" if i==8 and is_eligible_zero else ""
+                text_color = RGBColor(203, 67, 53) if i==8 and is_eligible_zero else None
+                if i == 1:
+                    format_name_cell_with_small_suffix(cell, val, base_size=14, small_size=10, font_name="Calibri", color_rgb=text_color, align="left")
+                else:
+                    format_cell_advanced(cell, val, size_pt=14, font_name="Calibri", color_rgb=text_color, align="left" if i==1 else "center")
+                if is_eligible_zero: set_cell_background(cell, "EC7063")
+                else:
+                    if i==0: set_cell_background(cell, "D4E6F1")
+                    elif i==4: set_cell_background(cell, "EBF5FB")
+                    elif i==5: set_cell_background(cell, "E8F8F5")
+                if i==6: set_cell_background(cell, "E5E7E9")
     return save_doc_buffer(doc, df)
 
 def build_professional_word_report_v3(df, filename_base, card_choice):
@@ -560,28 +666,50 @@ def build_professional_word_report_v3(df, filename_base, card_choice):
     title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     title_run = title_p.add_run(f"الكشف الإحصائي المنسق للوكيل: {clean_name}")
     title_run.font.name, title_run.font.size, title_run.bold = "Segoe UI Semibold", Pt(14), True
-    headers = ["ت", "اسم رب الأسرة", card_choice, "الكلي", "مستحق", "محجوب", "الشهر الأول", "الشهر الثاني", "الشهر الثالث", "الشهر الرابع"]
-    table = doc.add_table(rows=1, cols=10)
+    is_combined = card_choice == "القديم والحديث"
+    orig_headers = ["ت", "اسم رب الأسرة", card_choice, "الكلي", "مستحق", "محجوب", "الشهر الأول", "الشهر الثاني", "الشهر الثالث", "الشهر الرابع"]
+    dynamic_name_width = Cm(max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15) * 0.22 + 0.5)
+    col_widths = [Cm(0.9), dynamic_name_width, Cm(1.8), Cm(0.9), Cm(0.9), Cm(0.9), Cm(2.3), Cm(2.3), Cm(2.3), Cm(2.3)]
+    COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
+    remaining_indices = [1, 3, 4, 5, 6, 7, 8, 9] if is_combined else None
+
+    headers = (["ت", "القديم", "الحديث"] + [orig_headers[i] for i in remaining_indices]) if is_combined else orig_headers
+    table = doc.add_table(rows=1, cols=len(headers))
     table.style, table.alignment = 'Table Grid', WD_TABLE_ALIGNMENT.CENTER
     set_table_borders(table, color_hex="2A4B7C")
     table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
     table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
-    
-    table.rows[0].height = Inches(0.75)
-    
-    dynamic_name_width = Cm(max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15) * 0.22 + 0.5)
-    col_widths = [Cm(0.9), dynamic_name_width, Cm(1.8), Cm(0.9), Cm(0.9), Cm(0.9), Cm(2.3), Cm(2.3), Cm(2.3), Cm(2.3)]
-    COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
 
-    for i, title in enumerate(headers):
-        cell = table.rows[0].cells[i]
-        cell.width = col_widths[i]
-        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-        if i in [3, 4, 5]: set_cell_vertical_text(cell)
-        if i == 2:
-            format_header_cell_two_lines(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", color_rgb=COLOR_NAVY_BLUE)
-        else:
+    table.rows[0].height = Inches(0.75)
+
+    if is_combined:
+        hdr_cells = table.rows[0].cells
+        cell = hdr_cells[0]
+        cell.width, cell.vertical_alignment = col_widths[0], WD_ALIGN_VERTICAL.CENTER
+        format_cell_advanced(cell, "ت", bold=True, size_pt=12, font_name="Segoe UI Semibold", align="center", color_rgb=COLOR_NAVY_BLUE)
+        j = 1
+        for label in ["القديم", "الحديث"]:
+            cell = hdr_cells[j]
+            cell.width, cell.vertical_alignment = Cm(1.8), WD_ALIGN_VERTICAL.CENTER
+            format_cell_advanced(cell, label, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="center", color_rgb=COLOR_NAVY_BLUE)
+            j += 1
+        for i in remaining_indices:
+            cell = hdr_cells[j]
+            cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
+            title = orig_headers[i]
+            if i in [3, 4, 5]: set_cell_vertical_text(cell)
             format_cell_advanced(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="left" if i == 1 else "center", color_rgb=COLOR_NAVY_BLUE)
+            j += 1
+    else:
+        for i, title in enumerate(headers):
+            cell = table.rows[0].cells[i]
+            cell.width = col_widths[i]
+            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+            if i in [3, 4, 5]: set_cell_vertical_text(cell)
+            if i == 2:
+                format_header_cell_two_lines(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", color_rgb=COLOR_NAVY_BLUE)
+            else:
+                format_cell_advanced(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="left" if i == 1 else "center", color_rgb=COLOR_NAVY_BLUE)
 
     for idx, row in df.iterrows():
         new_row = table.add_row()
@@ -589,22 +717,49 @@ def build_professional_word_report_v3(df, filename_base, card_choice):
         row_cells = new_row.cells
         table.rows[idx+1]._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
         is_eligible_zero = int(row["مستحق"]) == 0
-        set_cell_no_wrap(row_cells[1])
 
-        for i in range(10):
-            cell = row_cells[i]
-            cell.width = col_widths[i]
-            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-            val = row["ت"] if i==0 else row["اسم رب الأسرة"] if i==1 else row["رقم البطاقة"] if i==2 else row["الكلي"] if i==3 else row["مستحق"] if i==4 else row["محجوب"] if i==5 else ""
-            if i == 1:
-                format_name_cell_with_small_suffix(cell, val, base_size=16, small_size=10, font_name="Calibri", color_rgb=None, align="left")
-            else:
-                format_cell_advanced(cell, val, size_pt=16, font_name="Calibri", color_rgb=None, align="left" if i==1 else "center")
+        if is_combined:
+            cell = row_cells[0]
+            cell.width, cell.vertical_alignment = col_widths[0], WD_ALIGN_VERTICAL.CENTER
+            format_cell_advanced(cell, row["ت"], size_pt=16, font_name="Calibri", align="center")
             if is_eligible_zero: set_cell_background(cell, "EC7063")
-            else:
-                if i == 0: set_cell_background(cell, "D4E6F1")
-            if i == 3: set_cell_background(cell, "E5E7E9")
-            if i == 5: set_cell_background(cell, "FCF3CF")
+            else: set_cell_background(cell, "D4E6F1")
+            j = 1
+            for card_key in ["رقم البطاقة القديم", "رقم البطاقة الحديث"]:
+                cell = row_cells[j]
+                cell.width, cell.vertical_alignment = Cm(1.8), WD_ALIGN_VERTICAL.CENTER
+                format_cell_advanced(cell, row[card_key], size_pt=16, font_name="Calibri", align="center")
+                if is_eligible_zero: set_cell_background(cell, "EC7063")
+                j += 1
+            for i in remaining_indices:
+                cell = row_cells[j]
+                cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
+                if i == 1: set_cell_no_wrap(cell)
+                val = row["ت"] if i==0 else row["اسم رب الأسرة"] if i==1 else row["رقم البطاقة"] if i==2 else row["الكلي"] if i==3 else row["مستحق"] if i==4 else row["محجوب"] if i==5 else ""
+                if i == 1:
+                    format_name_cell_with_small_suffix(cell, val, base_size=16, small_size=10, font_name="Calibri", color_rgb=None, align="left")
+                else:
+                    format_cell_advanced(cell, val, size_pt=16, font_name="Calibri", color_rgb=None, align="left" if i==1 else "center")
+                if is_eligible_zero: set_cell_background(cell, "EC7063")
+                if i == 3: set_cell_background(cell, "E5E7E9")
+                if i == 5: set_cell_background(cell, "FCF3CF")
+                j += 1
+        else:
+            set_cell_no_wrap(row_cells[1])
+            for i in range(10):
+                cell = row_cells[i]
+                cell.width = col_widths[i]
+                cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+                val = row["ت"] if i==0 else row["اسم رب الأسرة"] if i==1 else row["رقم البطاقة"] if i==2 else row["الكلي"] if i==3 else row["مستحق"] if i==4 else row["محجوب"] if i==5 else ""
+                if i == 1:
+                    format_name_cell_with_small_suffix(cell, val, base_size=16, small_size=10, font_name="Calibri", color_rgb=None, align="left")
+                else:
+                    format_cell_advanced(cell, val, size_pt=16, font_name="Calibri", color_rgb=None, align="left" if i==1 else "center")
+                if is_eligible_zero: set_cell_background(cell, "EC7063")
+                else:
+                    if i == 0: set_cell_background(cell, "D4E6F1")
+                if i == 3: set_cell_background(cell, "E5E7E9")
+                if i == 5: set_cell_background(cell, "FCF3CF")
     return save_doc_buffer(doc, df)
 
 def build_professional_word_report_v4(df, filename_base, card_choice):
@@ -618,29 +773,50 @@ def build_professional_word_report_v4(df, filename_base, card_choice):
     title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     title_run = title_p.add_run(f"الكشف الإحصائي المنسق للوكيل: {clean_name}")
     title_run.font.name, title_run.font.size, title_run.bold = "Segoe UI Semibold", Pt(14), True
-    headers = ["ت", card_choice, "اسم المواطن", "العدد الكلي"] + [f"سلة {i}" for i in range(1, 13)]
-    table = doc.add_table(rows=1, cols=16)
+    is_combined = card_choice == "القديم والحديث"
+    orig_headers = ["ت", card_choice, "اسم المواطن", "العدد الكلي"] + [f"سلة {i}" for i in range(1, 13)]
+    dynamic_name_width = Cm(max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15) * 0.22 + 0.5)
+    col_widths = [Cm(0.9), Cm(1.8), dynamic_name_width, Cm(0.9)] + [Cm(1.05)] * 12
+    COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
+    remaining_indices = list(range(2, 16)) if is_combined else None
+
+    headers = (["ت", "القديم", "الحديث"] + [orig_headers[i] for i in remaining_indices]) if is_combined else orig_headers
+    table = doc.add_table(rows=1, cols=len(headers))
     table.style, table.alignment = 'Table Grid', WD_TABLE_ALIGNMENT.CENTER
     set_table_borders(table, color_hex="2A4B7C")
     table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
     table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
-    
+
     table.rows[0].height = Inches(0.75)
-    
-    dynamic_name_width = Cm(max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15) * 0.22 + 0.5)
-    col_widths = [Cm(0.9), Cm(1.8), dynamic_name_width, Cm(0.9)] + [Cm(1.05)] * 12
-    COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
 
     hdr_cells = table.rows[0].cells
-    for i, title in enumerate(headers):
-        cell = hdr_cells[i]
-        cell.width = col_widths[i]
-        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-        if i >= 3: set_cell_vertical_text(cell)
-        if i == 1:
-            format_header_cell_two_lines(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", color_rgb=COLOR_NAVY_BLUE)
-        else:
+    if is_combined:
+        cell = hdr_cells[0]
+        cell.width, cell.vertical_alignment = col_widths[0], WD_ALIGN_VERTICAL.CENTER
+        format_cell_advanced(cell, "ت", bold=True, size_pt=12, font_name="Segoe UI Semibold", align="center", color_rgb=COLOR_NAVY_BLUE)
+        j = 1
+        for label in ["القديم", "الحديث"]:
+            cell = hdr_cells[j]
+            cell.width, cell.vertical_alignment = Cm(1.8), WD_ALIGN_VERTICAL.CENTER
+            format_cell_advanced(cell, label, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="center", color_rgb=COLOR_NAVY_BLUE)
+            j += 1
+        for i in remaining_indices:
+            cell = hdr_cells[j]
+            cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
+            title = orig_headers[i]
+            if i >= 3: set_cell_vertical_text(cell)
             format_cell_advanced(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="left" if i == 2 else "center", color_rgb=COLOR_NAVY_BLUE)
+            j += 1
+    else:
+        for i, title in enumerate(headers):
+            cell = hdr_cells[i]
+            cell.width = col_widths[i]
+            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+            if i >= 3: set_cell_vertical_text(cell)
+            if i == 1:
+                format_header_cell_two_lines(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", color_rgb=COLOR_NAVY_BLUE)
+            else:
+                format_cell_advanced(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="left" if i == 2 else "center", color_rgb=COLOR_NAVY_BLUE)
 
     for idx, row in df.iterrows():
         new_row = table.add_row()
@@ -648,22 +824,50 @@ def build_professional_word_report_v4(df, filename_base, card_choice):
         row_cells = new_row.cells
         table.rows[idx+1]._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
         is_eligible_zero = int(row["مستحق"]) == 0
-        set_cell_no_wrap(row_cells[2])
 
-        for i in range(16):
-            cell = row_cells[i]
-            cell.width = col_widths[i]
-            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-            val = row["ت"] if i == 0 else row["رقم البطاقة"] if i == 1 else row["اسم رب الأسرة"] if i == 2 else row["الكلي"] if i == 3 else ""
-            cell_align = "left" if i == 2 else "center"
-            if i == 2:
-                format_name_cell_with_small_suffix(cell, val, base_size=14, small_size=10, font_name="Calibri", color_rgb=None, align="left")
-            else:
-                format_cell_advanced(cell, val, size_pt=14, font_name="Calibri", color_rgb=None, align=cell_align)
+        if is_combined:
+            cell = row_cells[0]
+            cell.width, cell.vertical_alignment = col_widths[0], WD_ALIGN_VERTICAL.CENTER
+            format_cell_advanced(cell, row["ت"], size_pt=14, font_name="Calibri", align="center")
             if is_eligible_zero: set_cell_background(cell, "EC7063")
-            else:
-                if i == 0: set_cell_background(cell, "D4E6F1")
-                if i == 3: set_cell_background(cell, "E8F8F5")
+            else: set_cell_background(cell, "D4E6F1")
+            j = 1
+            for card_key in ["رقم البطاقة القديم", "رقم البطاقة الحديث"]:
+                cell = row_cells[j]
+                cell.width, cell.vertical_alignment = Cm(1.8), WD_ALIGN_VERTICAL.CENTER
+                format_cell_advanced(cell, row[card_key], size_pt=14, font_name="Calibri", align="center")
+                if is_eligible_zero: set_cell_background(cell, "EC7063")
+                j += 1
+            for i in remaining_indices:
+                cell = row_cells[j]
+                cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
+                if i == 2: set_cell_no_wrap(cell)
+                val = row["ت"] if i == 0 else row["رقم البطاقة"] if i == 1 else row["اسم رب الأسرة"] if i == 2 else row["الكلي"] if i == 3 else ""
+                cell_align = "left" if i == 2 else "center"
+                if i == 2:
+                    format_name_cell_with_small_suffix(cell, val, base_size=14, small_size=10, font_name="Calibri", color_rgb=None, align="left")
+                else:
+                    format_cell_advanced(cell, val, size_pt=14, font_name="Calibri", color_rgb=None, align=cell_align)
+                if is_eligible_zero: set_cell_background(cell, "EC7063")
+                else:
+                    if i == 3: set_cell_background(cell, "E8F8F5")
+                j += 1
+        else:
+            set_cell_no_wrap(row_cells[2])
+            for i in range(16):
+                cell = row_cells[i]
+                cell.width = col_widths[i]
+                cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+                val = row["ت"] if i == 0 else row["رقم البطاقة"] if i == 1 else row["اسم رب الأسرة"] if i == 2 else row["الكلي"] if i == 3 else ""
+                cell_align = "left" if i == 2 else "center"
+                if i == 2:
+                    format_name_cell_with_small_suffix(cell, val, base_size=14, small_size=10, font_name="Calibri", color_rgb=None, align="left")
+                else:
+                    format_cell_advanced(cell, val, size_pt=14, font_name="Calibri", color_rgb=None, align=cell_align)
+                if is_eligible_zero: set_cell_background(cell, "EC7063")
+                else:
+                    if i == 0: set_cell_background(cell, "D4E6F1")
+                    if i == 3: set_cell_background(cell, "E8F8F5")
     return save_doc_buffer(doc, df)
 
 def build_professional_word_report_v5(df, filename_base, card_choice):
@@ -743,29 +947,50 @@ def build_professional_word_report_v6(df, filename_base, card_choice):
     title_run = title_p.add_run(f"الكشف الإحصائي المنسق للوكيل: {clean_name}")
     title_run.font.name, title_run.font.size, title_run.bold = "Segoe UI Semibold", Pt(14), True
     
-    headers = ["ت", card_choice, "اسم المواطن", "العدد المستحق"] + [f"سلة {i}" for i in range(1, 13)]
-    table = doc.add_table(rows=1, cols=16)
+    is_combined = card_choice == "القديم والحديث"
+    orig_headers = ["ت", card_choice, "اسم المواطن", "العدد المستحق"] + [f"سلة {i}" for i in range(1, 13)]
+    dynamic_name_width = Cm(max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15) * 0.22 + 0.5)
+    col_widths = [Cm(0.9), Cm(1.8), dynamic_name_width, Cm(1.1)] + [Cm(1.05)] * 12
+    COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
+    remaining_indices = list(range(2, 16)) if is_combined else None
+
+    headers = (["ت", "القديم", "الحديث"] + [orig_headers[i] for i in remaining_indices]) if is_combined else orig_headers
+    table = doc.add_table(rows=1, cols=len(headers))
     table.style, table.alignment = 'Table Grid', WD_TABLE_ALIGNMENT.CENTER
     set_table_borders(table, color_hex="2A4B7C")
     table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
     table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
-    
+
     table.rows[0].height = Inches(0.75)
-    
-    dynamic_name_width = Cm(max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15) * 0.22 + 0.5)
-    col_widths = [Cm(0.9), Cm(1.8), dynamic_name_width, Cm(1.1)] + [Cm(1.05)] * 12
-    COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
     hdr_cells = table.rows[0].cells
 
-    for i, title in enumerate(headers):
-        cell = hdr_cells[i]
-        cell.width = col_widths[i]
-        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-        if i >= 3: set_cell_vertical_text(cell)
-        if i == 1:
-            format_header_cell_two_lines(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", color_rgb=COLOR_NAVY_BLUE)
-        else:
+    if is_combined:
+        cell = hdr_cells[0]
+        cell.width, cell.vertical_alignment = col_widths[0], WD_ALIGN_VERTICAL.CENTER
+        format_cell_advanced(cell, "ت", bold=True, size_pt=12, font_name="Segoe UI Semibold", align="center", color_rgb=COLOR_NAVY_BLUE)
+        j = 1
+        for label in ["القديم", "الحديث"]:
+            cell = hdr_cells[j]
+            cell.width, cell.vertical_alignment = Cm(1.8), WD_ALIGN_VERTICAL.CENTER
+            format_cell_advanced(cell, label, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="center", color_rgb=COLOR_NAVY_BLUE)
+            j += 1
+        for i in remaining_indices:
+            cell = hdr_cells[j]
+            cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
+            title = orig_headers[i]
+            if i >= 3: set_cell_vertical_text(cell)
             format_cell_advanced(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="left" if i == 2 else "center", color_rgb=COLOR_NAVY_BLUE)
+            j += 1
+    else:
+        for i, title in enumerate(headers):
+            cell = hdr_cells[i]
+            cell.width = col_widths[i]
+            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+            if i >= 3: set_cell_vertical_text(cell)
+            if i == 1:
+                format_header_cell_two_lines(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", color_rgb=COLOR_NAVY_BLUE)
+            else:
+                format_cell_advanced(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="left" if i == 2 else "center", color_rgb=COLOR_NAVY_BLUE)
 
     for idx, row in df.iterrows():
         new_row = table.add_row()
@@ -773,27 +998,55 @@ def build_professional_word_report_v6(df, filename_base, card_choice):
         row_cells = new_row.cells
         table.rows[idx+1]._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
         is_eligible_zero = int(row["مستحق"]) == 0
-        set_cell_no_wrap(row_cells[2])
 
-        for i in range(16):
-            cell = row_cells[i]
-            cell.width = col_widths[i]
-            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        if is_combined:
+            cell = row_cells[0]
+            cell.width, cell.vertical_alignment = col_widths[0], WD_ALIGN_VERTICAL.CENTER
+            format_cell_advanced(cell, row["ت"], size_pt=14, font_name="Calibri", align="center")
+            if is_eligible_zero: set_cell_background(cell, "EC7063")
+            else: set_cell_background(cell, "D4E6F1")
+            j = 1
+            for card_key in ["رقم البطاقة القديم", "رقم البطاقة الحديث"]:
+                cell = row_cells[j]
+                cell.width, cell.vertical_alignment = Cm(1.8), WD_ALIGN_VERTICAL.CENTER
+                format_cell_advanced(cell, row[card_key], size_pt=14, font_name="Calibri", align="center")
+                if is_eligible_zero: set_cell_background(cell, "EC7063")
+                j += 1
+            for i in remaining_indices:
+                cell = row_cells[j]
+                cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
+                if i == 2: set_cell_no_wrap(cell)
+                val = row["ت"] if i == 0 else row["رقم البطاقة"] if i == 1 else row["اسم رب الأسرة"] if i == 2 else row["مستحق"] if i == 3 else ""
+                cell_align = "left" if i == 2 else "center"
+                if i == 2:
+                    format_name_cell_with_small_suffix(cell, val, base_size=14, small_size=10, font_name="Calibri", color_rgb=None, align="left")
+                else:
+                    format_cell_advanced(cell, val, size_pt=14, font_name="Calibri", color_rgb=None, align=cell_align)
+                if is_eligible_zero: set_cell_background(cell, "EC7063")
+                else:
+                    if i == 3: set_cell_background(cell, "E8F8F5")
+                j += 1
+        else:
+            set_cell_no_wrap(row_cells[2])
+            for i in range(16):
+                cell = row_cells[i]
+                cell.width = col_widths[i]
+                cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
-            val = row["ت"] if i == 0 else row["رقم البطاقة"] if i == 1 else row["اسم رب الأسرة"] if i == 2 else row["مستحق"] if i == 3 else ""
-            cell_align = "left" if i == 2 else "center"
+                val = row["ت"] if i == 0 else row["رقم البطاقة"] if i == 1 else row["اسم رب الأسرة"] if i == 2 else row["مستحق"] if i == 3 else ""
+                cell_align = "left" if i == 2 else "center"
 
-            if i == 2:
-                format_name_cell_with_small_suffix(cell, val, base_size=14, small_size=10, font_name="Calibri", color_rgb=None, align="left")
-            else:
-                format_cell_advanced(cell, val, size_pt=14, font_name="Calibri", color_rgb=None, align=cell_align)
+                if i == 2:
+                    format_name_cell_with_small_suffix(cell, val, base_size=14, small_size=10, font_name="Calibri", color_rgb=None, align="left")
+                else:
+                    format_cell_advanced(cell, val, size_pt=14, font_name="Calibri", color_rgb=None, align=cell_align)
 
-            if is_eligible_zero:
-                set_cell_background(cell, "EC7063")
-            else:
-                if i == 0: set_cell_background(cell, "D4E6F1")
-                if i == 3: set_cell_background(cell, "E8F8F5")
-                
+                if is_eligible_zero:
+                    set_cell_background(cell, "EC7063")
+                else:
+                    if i == 0: set_cell_background(cell, "D4E6F1")
+                    if i == 3: set_cell_background(cell, "E8F8F5")
+
     return save_doc_buffer(doc, df)
 
 # --- النموذج الثامن: مطابق للسادس (العدد المستحق) لكن بـ 8 سلات، وعناوين بلتفاف عادي
@@ -811,35 +1064,67 @@ def build_professional_word_report_v8(df, filename_base, card_choice):
     title_run = title_p.add_run(f"الكشف الإحصائي المنسق للوكيل: {clean_name}")
     title_run.font.name, title_run.font.size, title_run.bold = "Segoe UI Semibold", Pt(14), True
 
-    headers = ["ت", card_choice, "اسم المواطن", "العدد المستحق"] + [f"سلة {i}" for i in range(1, 9)]
-    table = doc.add_table(rows=1, cols=12)
-    table.style, table.alignment = 'Table Grid', WD_TABLE_ALIGNMENT.CENTER
-    set_table_borders(table, color_hex="2A4B7C")
-    table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
-    table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
-
-    table.rows[0].height = Inches(0.75)
+    is_combined = card_choice == "القديم والحديث"
 
     def dynamic_col_width(series, min_chars=1, char_cm=0.22, padding_cm=0.5):
         max_len = max(series.astype(str).str.len().max(), min_chars)
         return Cm(max_len * char_cm + padding_cm)
 
     ت_width = dynamic_col_width(df["ت"])
-    card_width = dynamic_col_width(df["رقم البطاقة"])
     name_width = dynamic_col_width(df["اسم رب الأسرة"], min_chars=15)
     count_width = dynamic_col_width(df["مستحق"])
-    col_widths = [ت_width, card_width, name_width, count_width] + [Cm(1.05)] * 8
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
+
+    orig_headers = ["ت", card_choice, "اسم المواطن", "العدد المستحق"] + [f"سلة {i}" for i in range(1, 9)]
+    if is_combined:
+        old_card_width = dynamic_col_width(df["رقم البطاقة القديم"])
+        new_card_width = dynamic_col_width(df["رقم البطاقة الحديث"])
+        col_widths = [ت_width, old_card_width, new_card_width, name_width, count_width] + [Cm(1.05)] * 8
+        remaining_indices = list(range(2, 12))
+        headers = ["ت", "القديم", "الحديث"] + [orig_headers[i] for i in remaining_indices]
+    else:
+        card_width = dynamic_col_width(df["رقم البطاقة"])
+        col_widths = [ت_width, card_width, name_width, count_width] + [Cm(1.05)] * 8
+        remaining_indices = None
+        headers = orig_headers
+
+    table = doc.add_table(rows=1, cols=len(headers))
+    table.style, table.alignment = 'Table Grid', WD_TABLE_ALIGNMENT.CENTER
+    set_table_borders(table, color_hex="2A4B7C")
+    table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
+    table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
+
+    table.rows[0].height = Inches(0.75)
     hdr_cells = table.rows[0].cells
 
-    for i, title in enumerate(headers):
-        cell = hdr_cells[i]
-        cell.width = col_widths[i]
-        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-        if i == 1:
-            format_header_cell_two_lines(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", color_rgb=COLOR_NAVY_BLUE)
-        else:
+    if is_combined:
+        cell = hdr_cells[0]
+        cell.width, cell.vertical_alignment = col_widths[0], WD_ALIGN_VERTICAL.CENTER
+        format_cell_advanced(cell, "ت", bold=True, size_pt=12, font_name="Segoe UI Semibold", align="center", color_rgb=COLOR_NAVY_BLUE)
+        cell = hdr_cells[1]
+        cell.width, cell.vertical_alignment = old_card_width, WD_ALIGN_VERTICAL.CENTER
+        format_cell_advanced(cell, "القديم", bold=True, size_pt=12, font_name="Segoe UI Semibold", align="center", color_rgb=COLOR_NAVY_BLUE)
+        cell = hdr_cells[2]
+        cell.width, cell.vertical_alignment = new_card_width, WD_ALIGN_VERTICAL.CENTER
+        format_cell_advanced(cell, "الحديث", bold=True, size_pt=12, font_name="Segoe UI Semibold", align="center", color_rgb=COLOR_NAVY_BLUE)
+        j = 3
+        # col_widths here is indexed by NEW layout position, matching remaining_indices' write order
+        remaining_widths = [name_width, count_width] + [Cm(1.05)] * 8
+        for pos, i in enumerate(remaining_indices):
+            cell = hdr_cells[j]
+            cell.width, cell.vertical_alignment = remaining_widths[pos], WD_ALIGN_VERTICAL.CENTER
+            title = orig_headers[i]
             format_cell_advanced(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="left" if i == 2 else "center", color_rgb=COLOR_NAVY_BLUE)
+            j += 1
+    else:
+        for i, title in enumerate(headers):
+            cell = hdr_cells[i]
+            cell.width = col_widths[i]
+            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+            if i == 1:
+                format_header_cell_two_lines(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", color_rgb=COLOR_NAVY_BLUE)
+            else:
+                format_cell_advanced(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="left" if i == 2 else "center", color_rgb=COLOR_NAVY_BLUE)
 
     for idx, row in df.iterrows():
         new_row = table.add_row()
@@ -847,26 +1132,60 @@ def build_professional_word_report_v8(df, filename_base, card_choice):
         row_cells = new_row.cells
         table.rows[idx+1]._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
         is_eligible_zero = int(row["مستحق"]) == 0
-        set_cell_no_wrap(row_cells[2])
 
-        for i in range(12):
-            cell = row_cells[i]
-            cell.width = col_widths[i]
-            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        if is_combined:
+            cell = row_cells[0]
+            cell.width, cell.vertical_alignment = col_widths[0], WD_ALIGN_VERTICAL.CENTER
+            format_cell_advanced(cell, row["ت"], size_pt=14, font_name="Calibri", align="center")
+            if is_eligible_zero: set_cell_background(cell, "EC7063")
+            else: set_cell_background(cell, "D4E6F1")
 
-            val = row["ت"] if i == 0 else row["رقم البطاقة"] if i == 1 else row["اسم رب الأسرة"] if i == 2 else row["مستحق"] if i == 3 else ""
-            cell_align = "left" if i == 2 else "center"
+            cell = row_cells[1]
+            cell.width, cell.vertical_alignment = old_card_width, WD_ALIGN_VERTICAL.CENTER
+            format_cell_advanced(cell, row["رقم البطاقة القديم"], size_pt=14, font_name="Calibri", align="center")
+            if is_eligible_zero: set_cell_background(cell, "EC7063")
 
-            if i == 2:
-                format_name_cell_with_small_suffix(cell, val, base_size=14, small_size=10, font_name="Calibri", color_rgb=None, align="left")
-            else:
-                format_cell_advanced(cell, val, size_pt=14, font_name="Calibri", color_rgb=None, align=cell_align)
+            cell = row_cells[2]
+            cell.width, cell.vertical_alignment = new_card_width, WD_ALIGN_VERTICAL.CENTER
+            format_cell_advanced(cell, row["رقم البطاقة الحديث"], size_pt=14, font_name="Calibri", align="center")
+            if is_eligible_zero: set_cell_background(cell, "EC7063")
 
-            if is_eligible_zero:
-                set_cell_background(cell, "EC7063")
-            else:
-                if i == 0: set_cell_background(cell, "D4E6F1")
-                if i == 3: set_cell_background(cell, "E8F8F5")
+            j = 3
+            remaining_widths = [name_width, count_width] + [Cm(1.05)] * 8
+            for pos, i in enumerate(remaining_indices):
+                cell = row_cells[j]
+                cell.width, cell.vertical_alignment = remaining_widths[pos], WD_ALIGN_VERTICAL.CENTER
+                if i == 2: set_cell_no_wrap(cell)
+                val = row["ت"] if i == 0 else row["رقم البطاقة"] if i == 1 else row["اسم رب الأسرة"] if i == 2 else row["مستحق"] if i == 3 else ""
+                cell_align = "left" if i == 2 else "center"
+                if i == 2:
+                    format_name_cell_with_small_suffix(cell, val, base_size=14, small_size=10, font_name="Calibri", color_rgb=None, align="left")
+                else:
+                    format_cell_advanced(cell, val, size_pt=14, font_name="Calibri", color_rgb=None, align=cell_align)
+                if is_eligible_zero: set_cell_background(cell, "EC7063")
+                else:
+                    if i == 3: set_cell_background(cell, "E8F8F5")
+                j += 1
+        else:
+            set_cell_no_wrap(row_cells[2])
+            for i in range(12):
+                cell = row_cells[i]
+                cell.width = col_widths[i]
+                cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+
+                val = row["ت"] if i == 0 else row["رقم البطاقة"] if i == 1 else row["اسم رب الأسرة"] if i == 2 else row["مستحق"] if i == 3 else ""
+                cell_align = "left" if i == 2 else "center"
+
+                if i == 2:
+                    format_name_cell_with_small_suffix(cell, val, base_size=14, small_size=10, font_name="Calibri", color_rgb=None, align="left")
+                else:
+                    format_cell_advanced(cell, val, size_pt=14, font_name="Calibri", color_rgb=None, align=cell_align)
+
+                if is_eligible_zero:
+                    set_cell_background(cell, "EC7063")
+                else:
+                    if i == 0: set_cell_background(cell, "D4E6F1")
+                    if i == 3: set_cell_background(cell, "E8F8F5")
 
     return save_doc_buffer(doc, df)
 
@@ -884,30 +1203,52 @@ def build_professional_word_report_v7(df, filename_base, card_choice):
     title_run = title_p.add_run(f"الكشف الإحصائي المنسق للوكيل: {clean_name}")
     title_run.font.name, title_run.font.size, title_run.bold = "Segoe UI Semibold", Pt(14), True
     
-    headers = ["ت", "اسم رب الأسرة", card_choice, "الكلي", "المستحق", "المحجوب", "سكر", "زيت", "تمن", "معجون", "فاصوليا", "عدس", "حمص"]
-    table = doc.add_table(rows=1, cols=13)
-    table.style, table.alignment = 'Table Grid', WD_TABLE_ALIGNMENT.CENTER
-    set_table_borders(table, color_hex="2A4B7C")
-    table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
-    table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
-    
-    table.rows[0].height = Inches(0.75)
-    
+    is_combined = card_choice == "القديم والحديث"
+    orig_headers = ["ت", "اسم رب الأسرة", card_choice, "الكلي", "المستحق", "المحجوب", "سكر", "زيت", "تمن", "معجون", "فاصوليا", "عدس", "حمص"]
     dynamic_name_width = Cm(max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15) * 0.22 + 0.5)
     # تخصيص مساحات ثابتة للمواد (1.1 سم لكل مادة)
     col_widths = [Cm(0.9), dynamic_name_width, Cm(1.8), Cm(0.8), Cm(0.8), Cm(0.8)] + [Cm(1.1)] * 7
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
+    remaining_indices = [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] if is_combined else None
 
-    for i, title in enumerate(headers):
-        cell = table.rows[0].cells[i]
-        cell.width = col_widths[i]
-        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-        # جعل النصوص للأرقام والمواد بشكل عمودي
-        if i >= 3: set_cell_vertical_text(cell)
-        if i == 2:
-            format_header_cell_two_lines(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", color_rgb=COLOR_NAVY_BLUE)
-        else:
+    headers = (["ت", "القديم", "الحديث"] + [orig_headers[i] for i in remaining_indices]) if is_combined else orig_headers
+    table = doc.add_table(rows=1, cols=len(headers))
+    table.style, table.alignment = 'Table Grid', WD_TABLE_ALIGNMENT.CENTER
+    set_table_borders(table, color_hex="2A4B7C")
+    table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
+    table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
+
+    table.rows[0].height = Inches(0.75)
+
+    if is_combined:
+        hdr_cells = table.rows[0].cells
+        cell = hdr_cells[0]
+        cell.width, cell.vertical_alignment = col_widths[0], WD_ALIGN_VERTICAL.CENTER
+        format_cell_advanced(cell, "ت", bold=True, size_pt=12, font_name="Segoe UI Semibold", align="center", color_rgb=COLOR_NAVY_BLUE)
+        j = 1
+        for label in ["القديم", "الحديث"]:
+            cell = hdr_cells[j]
+            cell.width, cell.vertical_alignment = Cm(1.8), WD_ALIGN_VERTICAL.CENTER
+            format_cell_advanced(cell, label, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="center", color_rgb=COLOR_NAVY_BLUE)
+            j += 1
+        for i in remaining_indices:
+            cell = hdr_cells[j]
+            cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
+            title = orig_headers[i]
+            if i >= 3: set_cell_vertical_text(cell)
             format_cell_advanced(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="left" if i == 1 else "center", color_rgb=COLOR_NAVY_BLUE)
+            j += 1
+    else:
+        for i, title in enumerate(headers):
+            cell = table.rows[0].cells[i]
+            cell.width = col_widths[i]
+            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+            # جعل النصوص للأرقام والمواد بشكل عمودي
+            if i >= 3: set_cell_vertical_text(cell)
+            if i == 2:
+                format_header_cell_two_lines(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", color_rgb=COLOR_NAVY_BLUE)
+            else:
+                format_cell_advanced(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="left" if i == 1 else "center", color_rgb=COLOR_NAVY_BLUE)
 
     for idx, row in df.iterrows():
         new_row = table.add_row()
@@ -915,28 +1256,59 @@ def build_professional_word_report_v7(df, filename_base, card_choice):
         row_cells = new_row.cells
         table.rows[idx+1]._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
         is_eligible_zero = int(row["مستحق"]) == 0
-        set_cell_no_wrap(row_cells[1])
 
-        for i in range(13):
-            cell = row_cells[i]
-            cell.width = col_widths[i]
-            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-            val = row["ت"] if i == 0 else row["اسم رب الأسرة"] if i == 1 else row["رقم البطاقة"] if i == 2 else row["الكلي"] if i == 3 else row["مستحق"] if i == 4 else row["محجوب"] if i == 5 else ""
-            cell_align = "left" if i == 1 else "center"
+        if is_combined:
+            cell = row_cells[0]
+            cell.width, cell.vertical_alignment = col_widths[0], WD_ALIGN_VERTICAL.CENTER
+            format_cell_advanced(cell, row["ت"], size_pt=14, font_name="Calibri", align="center")
+            if is_eligible_zero: set_cell_background(cell, "EC7063")
+            else: set_cell_background(cell, "D4E6F1")
+            j = 1
+            for card_key in ["رقم البطاقة القديم", "رقم البطاقة الحديث"]:
+                cell = row_cells[j]
+                cell.width, cell.vertical_alignment = Cm(1.8), WD_ALIGN_VERTICAL.CENTER
+                format_cell_advanced(cell, row[card_key], size_pt=14, font_name="Calibri", align="center")
+                if is_eligible_zero: set_cell_background(cell, "EC7063")
+                j += 1
+            for i in remaining_indices:
+                cell = row_cells[j]
+                cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
+                if i == 1: set_cell_no_wrap(cell)
+                val = row["ت"] if i == 0 else row["اسم رب الأسرة"] if i == 1 else row["رقم البطاقة"] if i == 2 else row["الكلي"] if i == 3 else row["مستحق"] if i == 4 else row["محجوب"] if i == 5 else ""
+                cell_align = "left" if i == 1 else "center"
+                if i == 1:
+                    format_name_cell_with_small_suffix(cell, val, base_size=14, small_size=10, font_name="Calibri", color_rgb=None, align="left")
+                else:
+                    format_cell_advanced(cell, val, size_pt=14, font_name="Calibri", color_rgb=None, align=cell_align)
+                if is_eligible_zero:
+                    set_cell_background(cell, "EC7063")
+                else:
+                    if i == 3: set_cell_background(cell, "EBF5FB")
+                    elif i == 4: set_cell_background(cell, "E8F8F5")
+                    elif i == 5: set_cell_background(cell, "FADBD8")
+                j += 1
+        else:
+            set_cell_no_wrap(row_cells[1])
+            for i in range(13):
+                cell = row_cells[i]
+                cell.width = col_widths[i]
+                cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+                val = row["ت"] if i == 0 else row["اسم رب الأسرة"] if i == 1 else row["رقم البطاقة"] if i == 2 else row["الكلي"] if i == 3 else row["مستحق"] if i == 4 else row["محجوب"] if i == 5 else ""
+                cell_align = "left" if i == 1 else "center"
 
-            if i == 1:
-                format_name_cell_with_small_suffix(cell, val, base_size=14, small_size=10, font_name="Calibri", color_rgb=None, align="left")
-            else:
-                format_cell_advanced(cell, val, size_pt=14, font_name="Calibri", color_rgb=None, align=cell_align)
-            
-            if is_eligible_zero: 
-                set_cell_background(cell, "EC7063")
-            else:
-                if i == 0: set_cell_background(cell, "D4E6F1")
-                elif i == 3: set_cell_background(cell, "EBF5FB")
-                elif i == 4: set_cell_background(cell, "E8F8F5")
-                elif i == 5: set_cell_background(cell, "FADBD8")
-                
+                if i == 1:
+                    format_name_cell_with_small_suffix(cell, val, base_size=14, small_size=10, font_name="Calibri", color_rgb=None, align="left")
+                else:
+                    format_cell_advanced(cell, val, size_pt=14, font_name="Calibri", color_rgb=None, align=cell_align)
+
+                if is_eligible_zero:
+                    set_cell_background(cell, "EC7063")
+                else:
+                    if i == 0: set_cell_background(cell, "D4E6F1")
+                    elif i == 3: set_cell_background(cell, "EBF5FB")
+                    elif i == 4: set_cell_background(cell, "E8F8F5")
+                    elif i == 5: set_cell_background(cell, "FADBD8")
+
     return save_doc_buffer(doc, df)
 
 def save_doc_buffer(doc, df):
@@ -996,24 +1368,26 @@ def build_pdf_report(df, filename_base, card_choice, template_choice):
 
     page_orientation = "portrait"
     page_size = "A4"
-    
+    is_combined = card_choice == "القديم والحديث"
+    card_cols = ["القديم", "الحديث"] if is_combined else [card_choice]
+
     if template_choice == "النموذج الأول (الأصلي المطور)":
-        headers = ["ت", "اسم رب الأسرة", "حقل فارغ", "الكلي", "مستحق", "محجوب", card_choice, "ملاحظات"]
+        headers = ["ت"] + card_cols + ["اسم رب الأسرة", "حقل فارغ", "الكلي", "مستحق", "محجوب", "ملاحظات"] if is_combined else ["ت", "اسم رب الأسرة", "حقل فارغ", "الكلي", "مستحق", "محجوب", card_choice, "ملاحظات"]
     elif template_choice == "النموذج الثاني (حجم 14 وحقلين فارغين)":
-        headers = ["ت", "اسم رب الأسرة", "حقل فارغ 1", "حقل فارغ 2", "الكلي", "مستحق", "محجوب", card_choice, "ملاحظات"]
+        headers = ["ت"] + card_cols + ["اسم رب الأسرة", "حقل فارغ 1", "حقل فارغ 2", "الكلي", "مستحق", "محجوب", "ملاحظات"] if is_combined else ["ت", "اسم رب الأسرة", "حقل فارغ 1", "حقل فارغ 2", "الكلي", "مستحق", "محجوب", card_choice, "ملاحظات"]
     elif template_choice == "النموذج الثالث (خط 16، عناوين 12، 4 أشهر)":
-        headers = ["ت", "اسم رب الأسرة", card_choice, "الكلي", "مستحق", "محجوب", "الشهر الأول", "الشهر الثاني", "الشهر الثالث", "الشهر الرابع"]
+        headers = ["ت"] + card_cols + ["اسم رب الأسرة", "الكلي", "مستحق", "محجوب", "الشهر الأول", "الشهر الثاني", "الشهر الثالث", "الشهر الرابع"] if is_combined else ["ت", "اسم رب الأسرة", card_choice, "الكلي", "مستحق", "محجوب", "الشهر الأول", "الشهر الثاني", "الشهر الثالث", "الشهر الرابع"]
     elif template_choice == "النموذج الرابع (12 سلة، العدد الكلي)":
-        headers = ["ت", card_choice, "اسم المواطن", "العدد الكلي"] + [f"سلة {i}" for i in range(1, 13)]
+        headers = (["ت"] + card_cols + ["اسم المواطن", "العدد الكلي"] if is_combined else ["ت", card_choice, "اسم المواطن", "العدد الكلي"]) + [f"سلة {i}" for i in range(1, 13)]
         page_orientation = "landscape"
     elif template_choice == "النموذج السادس (12 سلة، العدد المستحق)":
-        headers = ["ت", card_choice, "اسم المواطن", "العدد المستحق"] + [f"سلة {i}" for i in range(1, 13)]
+        headers = (["ت"] + card_cols + ["اسم المواطن", "العدد المستحق"] if is_combined else ["ت", card_choice, "اسم المواطن", "العدد المستحق"]) + [f"سلة {i}" for i in range(1, 13)]
         page_orientation = "landscape"
     elif template_choice == "النموذج الثامن (8 سلات، العدد المستحق)":
-        headers = ["ت", card_choice, "اسم المواطن", "العدد المستحق"] + [f"سلة {i}" for i in range(1, 9)]
+        headers = (["ت"] + card_cols + ["اسم المواطن", "العدد المستحق"] if is_combined else ["ت", card_choice, "اسم المواطن", "العدد المستحق"]) + [f"سلة {i}" for i in range(1, 9)]
         page_orientation = "landscape"
     elif template_choice == "النموذج السابع (تفصيل المواد الغذائية)":
-        headers = ["ت", "اسم رب الأسرة", card_choice, "الكلي", "المستحق", "المحجوب", "سكر", "زيت", "تمن", "معجون", "فاصوليا", "عدس", "حمص"]
+        headers = ["ت"] + card_cols + ["اسم رب الأسرة", "الكلي", "المستحق", "المحجوب", "سكر", "زيت", "تمن", "معجون", "فاصوليا", "عدس", "حمص"] if is_combined else ["ت", "اسم رب الأسرة", card_choice, "الكلي", "المستحق", "المحجوب", "سكر", "زيت", "تمن", "معجون", "فاصوليا", "عدس", "حمص"]
         page_orientation = "landscape"
     else:
         headers = ["ت", "اسم رب الأسرة", "عدد الأفراد المستحقة", "حقل كبير فارغ", "حقل كبير فارغ"]
@@ -1024,37 +1398,39 @@ def build_pdf_report(df, filename_base, card_choice, template_choice):
     for idx, row in df.iterrows():
         is_eligible_zero = int(row["مستحق"]) == 0
         row_bg = "background-color: #EC7063;" if is_eligible_zero else ""
-        
+
         cells_html = ""
-        
+
+        card_vals = [(row["رقم البطاقة القديم"], ""), (row["رقم البطاقة الحديث"], "")] if is_combined else [(row["رقم البطاقة"], "")]
+
         if template_choice == "النموذج الأول (الأصلي المطور)":
             vals = [
                 (row["ت"], "background-color: #D4E6F1;" if not is_eligible_zero else ""),
+                *card_vals,
                 (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
                 ("x" if is_eligible_zero else "", ""),
                 (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
                 (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
                 (row["محجوب"], "background-color: #FADBD8;" if not is_eligible_zero else ""),
-                (row["رقم البطاقة"], ""),
                 ("محجوب" if is_eligible_zero else "", "color: #CB4335; font-weight: bold;" if is_eligible_zero else "")
             ]
         elif template_choice == "النموذج الثاني (حجم 14 وحقلين فارغين)":
             vals = [
                 (row["ت"], "background-color: #D4E6F1;" if not is_eligible_zero else ""),
+                *card_vals,
                 (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
                 ("x" if is_eligible_zero else "", ""),
                 ("x" if is_eligible_zero else "", ""),
                 (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
                 (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
                 (row["محجوب"], "background-color: #E5E7E9;" if not is_eligible_zero else ""),
-                (row["رقم البطاقة"], ""),
                 ("محجوب" if is_eligible_zero else "", "color: #CB4335; font-weight: bold;" if is_eligible_zero else "")
             ]
         elif template_choice == "النموذج الثالث (خط 16، عناوين 12، 4 أشهر)":
             vals = [
                 (row["ت"], "background-color: #D4E6F1;" if not is_eligible_zero else ""),
+                *card_vals,
                 (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
-                (row["رقم البطاقة"], ""),
                 (row["الكلي"], "background-color: #E5E7E9;" if not is_eligible_zero else ""),
                 (row["مستحق"], ""),
                 (row["محجوب"], "background-color: #FCF3CF;" if not is_eligible_zero else ""),
@@ -1063,29 +1439,29 @@ def build_pdf_report(df, filename_base, card_choice, template_choice):
         elif template_choice == "النموذج الرابع (12 سلة، العدد الكلي)":
             vals = [
                 (row["ت"], "background-color: #D4E6F1;" if not is_eligible_zero else ""),
-                (row["رقم البطاقة"], ""),
+                *card_vals,
                 (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
                 (row["الكلي"], "background-color: #E8F8F5;" if not is_eligible_zero else "")
             ] + [("", "")] * 12
         elif template_choice == "النموذج السادس (12 سلة، العدد المستحق)":
             vals = [
                 (row["ت"], "background-color: #D4E6F1;" if not is_eligible_zero else ""),
-                (row["رقم البطاقة"], ""),
+                *card_vals,
                 (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
                 (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else "")
             ] + [("", "")] * 12
         elif template_choice == "النموذج الثامن (8 سلات، العدد المستحق)":
             vals = [
                 (row["ت"], "background-color: #D4E6F1;" if not is_eligible_zero else ""),
-                (row["رقم البطاقة"], ""),
+                *card_vals,
                 (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
                 (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else "")
             ] + [("", "")] * 8
         elif template_choice == "النموذج السابع (تفصيل المواد الغذائية)":
             vals = [
                 (row["ت"], "background-color: #D4E6F1;" if not is_eligible_zero else ""),
+                *card_vals,
                 (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
-                (row["رقم البطاقة"], ""),
                 (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
                 (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
                 (row["محجوب"], "background-color: #FADBD8;" if not is_eligible_zero else ""),
