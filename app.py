@@ -313,12 +313,12 @@ def _locate_header_row(rows_data):
                 idx_map["ت"] = j
             elif "اسم" in c:
                 idx_map["اسم"] = j
-            elif "كلي" in c or "اجمالي" in c or "مجموع" in c:
-                idx_map["كلي"] = j
             elif "مستحق" in c:
                 idx_map["مستحق"] = j
             elif "محجوب" in c:
                 idx_map["محجوب"] = j
+            elif "كلي" in c or "اجمالي" in c or "مجموع" in c:
+                idx_map["كلي"] = j
             elif "تسلسل" not in c and ("بطاق" in c or "تموين" in c or "رقم" in c):
                 if "حديث" in c or "جديد" in c:
                     idx_map["بطاقة_حديث"] = j

@@ -108,6 +108,27 @@ def test_total_column_synonym_majmoo():
 
 
 # ---------------------------------------------------------------------------
+# 2ب) فخ: عمود بعنوان "مجموع المستحقين" يجب أن يُطابَق كـ"مستحق"، لا كـ"الكلي"
+#     (كلمة "مجموع" لا يجب أن تطغى على "مستحق"/"محجوب" لو ظهرت بالخلية نفسها).
+# ---------------------------------------------------------------------------
+def test_majmoo_does_not_shadow_mustahiq_or_mahjoob():
+    rows_data = [
+        ["ت", "اسم رب الأسرة", "رقم البطاقة", "مجموع الافراد", "مجموع المستحقين", "محجوب"],
+        ["1", "زينب عباس كاظم", "1234567", "6", "4", "2"],
+    ]
+    header_idx, idx_map = app._locate_header_row(rows_data)
+    check("majmoo_shadow: header found despite two 'مجموع' cells", header_idx == 0, detail=str(idx_map))
+    check("majmoo_shadow: 'مجموع المستحقين' mapped to مستحق, not الكلي",
+          idx_map["مستحق"] == 4, detail=str(idx_map))
+    check("majmoo_shadow: 'مجموع الافراد' (no مستحق/محجوب) still mapped to الكلي",
+          idx_map["كلي"] == 3, detail=str(idx_map))
+    records = app._extract_records_by_headers(rows_data, "رقم البطاقة القديم", "الاسم الثلاثي فقط")
+    check("majmoo_shadow: record extracted with correct values",
+          records is not None and records[0]["الكلي"] == 6 and records[0]["مستحق"] == 4,
+          detail=str(records))
+
+
+# ---------------------------------------------------------------------------
 # 3) عمود "الرقم التسلسلي" يجب ألا يُعامَل كعمود بطاقة (يحتوي "رقم" كنص فرعي).
 # ---------------------------------------------------------------------------
 def test_sequence_number_column_not_treated_as_card():
@@ -225,6 +246,7 @@ def main():
     tests = [
         test_real_world_layout_with_blank_column,
         test_total_column_synonym_majmoo,
+        test_majmoo_does_not_shadow_mustahiq_or_mahjoob,
         test_sequence_number_column_not_treated_as_card,
         test_diacritics_do_not_break_matching,
         test_validator_flags_leaked_card_number_in_total,
