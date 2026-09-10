@@ -818,7 +818,7 @@ def build_professional_word_report_v8(df, filename_base, card_choice):
     table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
     table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
 
-    table.rows[0].height = Inches(0.6)
+    table.rows[0].height = Inches(0.75)
 
     def dynamic_col_width(series, min_chars=1, char_cm=0.22, padding_cm=0.5):
         max_len = max(series.astype(str).str.len().max(), min_chars)
@@ -843,7 +843,7 @@ def build_professional_word_report_v8(df, filename_base, card_choice):
 
     for idx, row in df.iterrows():
         new_row = table.add_row()
-        new_row.height = Inches(0.4)
+        new_row.height = Inches(0.5)
         row_cells = new_row.cells
         table.rows[idx+1]._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
         is_eligible_zero = int(row["مستحق"]) == 0
