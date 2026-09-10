@@ -9,6 +9,8 @@ from docx.oxml import parse_xml, OxmlElement
 from docx.oxml.ns import nsdecls, qn
 import re
 import os
+import base64
+from functools import lru_cache
 from datetime import datetime
 
 # تم تعديل الاستثناء هنا ليتجاهل خطأ OSError تماماً بدلاً من توقف التطبيق
@@ -1476,6 +1478,52 @@ def save_doc_buffer(doc, df):
     return buffer
 
 # -----------------------------------------------------------------------------
+# خط Tajawal (أحد أكثر الخطوط العربية استخدامًا في تصميم المواقع والواجهات)
+# مضمّن كـ base64 داخل ملف PDF مباشرة لضمان ظهوره بنفس الشكل على أي خادم تشغيل،
+# بدل الاعتماد على خطوط النظام المحلي.
+# -----------------------------------------------------------------------------
+FONTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
+
+@lru_cache(maxsize=None)
+def _get_embedded_font_base64(filename):
+    path = os.path.join(FONTS_DIR, filename)
+    try:
+        with open(path, "rb") as f:
+            return base64.b64encode(f.read()).decode("ascii")
+    except OSError:
+        return None
+
+@lru_cache(maxsize=None)
+def get_pdf_font_face_css():
+    """يبني قواعد @font-face لخط Tajawal (عادي/بولد/إكسترا بولد) إن كانت الملفات متوفرة،
+    مع رجوع تلقائي لخطوط النظام إن تعذّر تحميلها."""
+    regular = _get_embedded_font_base64("Tajawal-Regular.ttf")
+    bold = _get_embedded_font_base64("Tajawal-Bold.ttf")
+    extrabold = _get_embedded_font_base64("Tajawal-ExtraBold.ttf")
+    if not (regular and bold and extrabold):
+        return ""
+    return f"""
+            @font-face {{
+                font-family: 'Tajawal';
+                font-weight: 400;
+                font-style: normal;
+                src: url(data:font/ttf;base64,{regular}) format('truetype');
+            }}
+            @font-face {{
+                font-family: 'Tajawal';
+                font-weight: 700;
+                font-style: normal;
+                src: url(data:font/ttf;base64,{bold}) format('truetype');
+            }}
+            @font-face {{
+                font-family: 'Tajawal';
+                font-weight: 800;
+                font-style: normal;
+                src: url(data:font/ttf;base64,{extrabold}) format('truetype');
+            }}
+    """
+
+# -----------------------------------------------------------------------------
 # المحرك الجديد: إنشاء تقارير PDF
 # -----------------------------------------------------------------------------
 def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alphabetically=True):
@@ -1541,38 +1589,74 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
         card_vals = [(row["رقم البطاقة القديم"], ""), (row["رقم البطاقة الحديث"], "")] if is_combined else [(row["رقم البطاقة"], "")]
 
         if template_choice == "النموذج الأول (الأصلي المطور)":
-            vals = [
-                (row["ت"], ter_bg),
-                *card_vals,
-                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
-                ("x" if is_eligible_zero else "", ""),
-                (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
-                (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
-                (row["محجوب"], "background-color: #FADBD8;" if not is_eligible_zero else ""),
-                ("محجوب" if is_eligible_zero else "", "color: #CB4335; font-weight: bold;" if is_eligible_zero else "")
-            ]
+            if is_combined:
+                vals = [
+                    (row["ت"], ter_bg),
+                    *card_vals,
+                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                    ("x" if is_eligible_zero else "", ""),
+                    (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
+                    (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
+                    (row["محجوب"], "background-color: #FADBD8;" if not is_eligible_zero else ""),
+                    ("محجوب" if is_eligible_zero else "", "color: #CB4335; font-weight: bold;" if is_eligible_zero else "")
+                ]
+            else:
+                vals = [
+                    (row["ت"], ter_bg),
+                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                    ("x" if is_eligible_zero else "", ""),
+                    (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
+                    (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
+                    (row["محجوب"], "background-color: #FADBD8;" if not is_eligible_zero else ""),
+                    *card_vals,
+                    ("محجوب" if is_eligible_zero else "", "color: #CB4335; font-weight: bold;" if is_eligible_zero else "")
+                ]
         elif template_choice == "النموذج الثاني (حجم 14 وحقلين فارغين)":
-            vals = [
-                (row["ت"], ter_bg),
-                *card_vals,
-                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
-                ("x" if is_eligible_zero else "", ""),
-                ("x" if is_eligible_zero else "", ""),
-                (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
-                (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
-                (row["محجوب"], "background-color: #E5E7E9;" if not is_eligible_zero else ""),
-                ("محجوب" if is_eligible_zero else "", "color: #CB4335; font-weight: bold;" if is_eligible_zero else "")
-            ]
+            if is_combined:
+                vals = [
+                    (row["ت"], ter_bg),
+                    *card_vals,
+                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                    ("x" if is_eligible_zero else "", ""),
+                    ("x" if is_eligible_zero else "", ""),
+                    (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
+                    (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
+                    (row["محجوب"], "background-color: #E5E7E9;" if not is_eligible_zero else ""),
+                    ("محجوب" if is_eligible_zero else "", "color: #CB4335; font-weight: bold;" if is_eligible_zero else "")
+                ]
+            else:
+                vals = [
+                    (row["ت"], ter_bg),
+                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                    ("x" if is_eligible_zero else "", ""),
+                    ("x" if is_eligible_zero else "", ""),
+                    (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
+                    (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
+                    (row["محجوب"], "background-color: #E5E7E9;" if not is_eligible_zero else ""),
+                    *card_vals,
+                    ("محجوب" if is_eligible_zero else "", "color: #CB4335; font-weight: bold;" if is_eligible_zero else "")
+                ]
         elif template_choice == "النموذج الثالث (خط 16، عناوين 12، 4 أشهر)":
-            vals = [
-                (row["ت"], ter_bg),
-                *card_vals,
-                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
-                (row["الكلي"], "background-color: #E5E7E9;" if not is_eligible_zero else ""),
-                (row["مستحق"], ""),
-                (row["محجوب"], "background-color: #FCF3CF;" if not is_eligible_zero else ""),
-                ("", ""), ("", ""), ("", ""), ("", "")
-            ]
+            if is_combined:
+                vals = [
+                    (row["ت"], ter_bg),
+                    *card_vals,
+                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                    (row["الكلي"], "background-color: #E5E7E9;" if not is_eligible_zero else ""),
+                    (row["مستحق"], ""),
+                    (row["محجوب"], "background-color: #FCF3CF;" if not is_eligible_zero else ""),
+                    ("", ""), ("", ""), ("", ""), ("", "")
+                ]
+            else:
+                vals = [
+                    (row["ت"], ter_bg),
+                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                    *card_vals,
+                    (row["الكلي"], "background-color: #E5E7E9;" if not is_eligible_zero else ""),
+                    (row["مستحق"], ""),
+                    (row["محجوب"], "background-color: #FCF3CF;" if not is_eligible_zero else ""),
+                    ("", ""), ("", ""), ("", ""), ("", "")
+                ]
         elif template_choice == "النموذج الرابع (12 سلة، العدد الكلي)":
             vals = [
                 (row["ت"], ter_bg),
@@ -1595,15 +1679,26 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
                 (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else "")
             ] + [("", "")] * 8
         elif template_choice == "النموذج السابع (تفصيل المواد الغذائية)":
-            vals = [
-                (row["ت"], ter_bg),
-                *card_vals,
-                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
-                (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
-                (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
-                (row["محجوب"], "background-color: #FADBD8;" if not is_eligible_zero else ""),
-                ("", ""), ("", ""), ("", ""), ("", ""), ("", ""), ("", ""), ("", "")
-            ]
+            if is_combined:
+                vals = [
+                    (row["ت"], ter_bg),
+                    *card_vals,
+                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                    (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
+                    (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
+                    (row["محجوب"], "background-color: #FADBD8;" if not is_eligible_zero else ""),
+                    ("", ""), ("", ""), ("", ""), ("", ""), ("", ""), ("", ""), ("", "")
+                ]
+            else:
+                vals = [
+                    (row["ت"], ter_bg),
+                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                    *card_vals,
+                    (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
+                    (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
+                    (row["محجوب"], "background-color: #FADBD8;" if not is_eligible_zero else ""),
+                    ("", ""), ("", ""), ("", ""), ("", ""), ("", ""), ("", ""), ("", "")
+                ]
         else:
             vals = [
                 (row["ت"], ter_bg),
@@ -1619,7 +1714,18 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
 
         rows_html += f'<tr>{cells_html}</tr>'
 
-    headers_html = "".join([f'<th>{h}</th>' for h in headers])
+    def _header_cell_html(h):
+        if "كلي" in h:
+            return f'<th><span class="pill pill-blue">{h}</span></th>'
+        if "مستحق" in h:
+            return f'<th><span class="pill pill-green">{h}</span></th>'
+        if "محجوب" in h:
+            return f'<th><span class="pill pill-red">{h}</span></th>'
+        return f'<th>{h}</th>'
+
+    headers_html = "".join([_header_cell_html(h) for h in headers])
+    font_face_css = get_pdf_font_face_css()
+    pdf_font_stack = "'Tajawal', 'Segoe UI Semibold', 'Segoe UI', 'Calibri', 'Tahoma', 'Arial', sans-serif"
 
     html_doc = f"""
     <!DOCTYPE html>
@@ -1627,27 +1733,58 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
     <head>
         <meta charset="utf-8">
         <style>
+            {font_face_css}
             @page {{
                 size: {page_size} {page_orientation};
-                margin: 8mm 6mm;
+                margin: 6mm;
                 @bottom-center {{
                     content: "صفحة " counter(page);
-                    font-size: 10pt;
-                    font-family: Arial, sans-serif;
+                    font-size: 9pt;
+                    font-weight: normal;
+                    color: #7A8AA3;
+                    font-family: {pdf_font_stack};
                 }}
             }}
             body {{
-                font-family: 'Segoe UI', 'Arial', sans-serif;
+                font-family: {pdf_font_stack};
+                font-weight: bold;
                 direction: rtl;
                 margin: 0;
-                padding: 0;
+                padding: 10mm 8mm;
+                background-image: radial-gradient(circle, #DCE4F0 1px, transparent 1px);
+                background-size: 16px 16px;
             }}
-            .title {{
-                text-align: right;
-                font-size: 14pt;
-                font-weight: bold;
-                color: #2A4B7C;
-                margin-bottom: 8px;
+            .invoice-card {{
+                background-color: #FFFFFF;
+                border: 2.5px solid #1B3A63;
+                border-radius: 20px;
+                overflow: hidden;
+            }}
+            .invoice-header {{
+                background-color: #1B3A63;
+                color: #FFFFFF;
+                padding: 14px 20px 12px;
+                border-bottom: 4px solid #D4AC0D;
+            }}
+            .invoice-title {{
+                font-size: 19pt;
+                font-weight: 800;
+                letter-spacing: 0.3px;
+            }}
+            .pill {{
+                display: inline-block;
+                padding: 3px 12px;
+                border-radius: 999px;
+                font-weight: 800;
+            }}
+            .pill-blue {{ background-color: #D6E9FA; color: #1F618D; }}
+            .pill-green {{ background-color: #D3F3E8; color: #117864; }}
+            .pill-red {{ background-color: #FBD9D3; color: #C0392B; }}
+            .invoice-subtitle {{
+                font-size: 9pt;
+                font-weight: normal;
+                opacity: 0.85;
+                margin-top: 4px;
             }}
             table {{
                 width: 100%;
@@ -1655,44 +1792,59 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
                 font-size: 11pt;
             }}
             th {{
-                background-color: #F2F4F8;
-                color: #2A4B7C;
-                border: 1px solid #2A4B7C;
-                padding: 6px 4px;
+                background-color: #EAF0F8;
+                color: #1B3A63;
+                border: 1px solid #C3D0E3;
+                padding: 7px 4px;
                 text-align: center;
                 font-weight: bold;
             }}
             td {{
-                border: 1px solid #2A4B7C;
+                border: 1px solid #C3D0E3;
                 padding: 4px 3px;
                 text-align: center;
                 vertical-align: middle;
                 white-space: nowrap;
+                font-weight: bold;
+            }}
+            tbody tr:nth-child(even) td {{
+                background-color: #F6F9FC;
+            }}
+            .invoice-footer {{
+                background-color: #F4F7FB;
+                border-top: 2px solid #1B3A63;
+                padding: 12px 20px;
             }}
             .stats {{
-                margin-top: 12px;
                 text-align: right;
                 font-weight: bold;
                 font-size: 12pt;
-                color: #2A4B7C;
-                line-height: 1.5;
+                color: #1B3A63;
+                line-height: 1.6;
             }}
         </style>
     </head>
     <body>
-        <div class="title">الكشف الإحصائي المنسق للوكيل: {clean_name}</div>
-        <table>
-            <thead>
-                <tr>{headers_html}</tr>
-            </thead>
-            <tbody>
-                {rows_html}
-            </tbody>
-        </table>
-        <div class="stats">
-            العدد الكلي للافراد = {total_all}<br>
-            العدد الكلي للمستحقين = {total_eligible}<br>
-            العدد الكلي للمحجوبين = {total_withheld}
+        <div class="invoice-card">
+            <div class="invoice-header">
+                <div class="invoice-title">الكشف الإحصائي المنسق للوكيل: {clean_name}</div>
+                <div class="invoice-subtitle">سجل إلكتروني رسمي — نظام تنسيق كشوفات الوكلاء</div>
+            </div>
+            <table>
+                <thead>
+                    <tr>{headers_html}</tr>
+                </thead>
+                <tbody>
+                    {rows_html}
+                </tbody>
+            </table>
+            <div class="invoice-footer">
+                <div class="stats">
+                    العدد الكلي للافراد = {total_all}<br>
+                    العدد الكلي للمستحقين = {total_eligible}<br>
+                    العدد الكلي للمحجوبين = {total_withheld}
+                </div>
+            </div>
         </div>
     </body>
     </html>
