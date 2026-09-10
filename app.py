@@ -214,11 +214,26 @@ def get_name_group_letter(name):
         return "ا"
     return first
 
-def get_letter_banner_color(letter):
+def get_letter_base_color(letter):
+    """اللون الأساسي المشبع للحرف (يُستخدم لنص البانر)."""
     return ARABIC_LETTER_BANNER_COLORS.get(letter, "5D6D7E")
 
+def blend_color_with_white(hex_color, alpha=0.25):
+    """يمزج اللون مع الأبيض بنسبة شفافية alpha لإعطاء تأثير هايلايت خفيف (بديل الشفافية الحقيقية)."""
+    r = int(hex_color[0:2], 16)
+    g = int(hex_color[2:4], 16)
+    b = int(hex_color[4:6], 16)
+    r = round(r * alpha + 255 * (1 - alpha))
+    g = round(g * alpha + 255 * (1 - alpha))
+    b = round(b * alpha + 255 * (1 - alpha))
+    return f"{r:02X}{g:02X}{b:02X}"
+
+def get_letter_banner_color(letter):
+    """لون هايلايت شفاف (25%) لكل حرف، يُستخدم لخلفية البانر وخانة الترقيم معاً."""
+    return blend_color_with_white(get_letter_base_color(letter), 0.25)
+
 def add_letter_banner_row(table, letter, height_inches=0.45):
-    """يضيف صف بانر ملوّن مدموج على كامل عرض الجدول يعرض الحرف بشكل أنيق."""
+    """يضيف صف بانر مدموج على كامل عرض الجدول بخلفية هايلايت شفافة (25%) ونص بلون الحرف الأساسي."""
     banner_row = table.add_row()
     banner_row.height = Inches(height_inches)
     cells = banner_row.cells
@@ -228,7 +243,7 @@ def add_letter_banner_row(table, letter, height_inches=0.45):
     color_hex = get_letter_banner_color(letter)
     set_cell_background(merged, color_hex)
     merged.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-    format_cell_advanced(merged, letter, bold=True, size_pt=18, font_name="Segoe UI Semibold", align="center", color_rgb=RGBColor(255, 255, 255))
+    format_cell_advanced(merged, letter, bold=True, size_pt=18, font_name="Segoe UI Semibold", align="center", color_rgb=RGBColor.from_string(get_letter_base_color(letter)))
     return color_hex
 
 def setup_document_layout(doc, filename_base, is_a3=False):
@@ -1508,9 +1523,10 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
             letter = get_name_group_letter(row["اسم رب الأسرة"])
             if letter != prev_letter:
                 current_letter_color = get_letter_banner_color(letter)
+                base_color = get_letter_base_color(letter)
                 rows_html += (
                     f'<tr><td colspan="{len(headers)}" '
-                    f'style="background-color: #{current_letter_color}; color: #FFFFFF; '
+                    f'style="background-color: #{current_letter_color}; color: #{base_color}; '
                     f'font-weight: bold; font-size: 14pt; text-align: center; padding: 6px 4px;">'
                     f'{letter}</td></tr>'
                 )
