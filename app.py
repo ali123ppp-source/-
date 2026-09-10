@@ -9,6 +9,8 @@ from docx.oxml import parse_xml, OxmlElement
 from docx.oxml.ns import nsdecls, qn
 import re
 import os
+import base64
+from functools import lru_cache
 from datetime import datetime
 
 # تم تعديل الاستثناء هنا ليتجاهل خطأ OSError تماماً بدلاً من توقف التطبيق
@@ -1476,6 +1478,52 @@ def save_doc_buffer(doc, df):
     return buffer
 
 # -----------------------------------------------------------------------------
+# خط Tajawal (أحد أكثر الخطوط العربية استخدامًا في تصميم المواقع والواجهات)
+# مضمّن كـ base64 داخل ملف PDF مباشرة لضمان ظهوره بنفس الشكل على أي خادم تشغيل،
+# بدل الاعتماد على خطوط النظام المحلي.
+# -----------------------------------------------------------------------------
+FONTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
+
+@lru_cache(maxsize=None)
+def _get_embedded_font_base64(filename):
+    path = os.path.join(FONTS_DIR, filename)
+    try:
+        with open(path, "rb") as f:
+            return base64.b64encode(f.read()).decode("ascii")
+    except OSError:
+        return None
+
+@lru_cache(maxsize=None)
+def get_pdf_font_face_css():
+    """يبني قواعد @font-face لخط Tajawal (عادي/بولد/إكسترا بولد) إن كانت الملفات متوفرة،
+    مع رجوع تلقائي لخطوط النظام إن تعذّر تحميلها."""
+    regular = _get_embedded_font_base64("Tajawal-Regular.ttf")
+    bold = _get_embedded_font_base64("Tajawal-Bold.ttf")
+    extrabold = _get_embedded_font_base64("Tajawal-ExtraBold.ttf")
+    if not (regular and bold and extrabold):
+        return ""
+    return f"""
+            @font-face {{
+                font-family: 'Tajawal';
+                font-weight: 400;
+                font-style: normal;
+                src: url(data:font/ttf;base64,{regular}) format('truetype');
+            }}
+            @font-face {{
+                font-family: 'Tajawal';
+                font-weight: 700;
+                font-style: normal;
+                src: url(data:font/ttf;base64,{bold}) format('truetype');
+            }}
+            @font-face {{
+                font-family: 'Tajawal';
+                font-weight: 800;
+                font-style: normal;
+                src: url(data:font/ttf;base64,{extrabold}) format('truetype');
+            }}
+    """
+
+# -----------------------------------------------------------------------------
 # المحرك الجديد: إنشاء تقارير PDF
 # -----------------------------------------------------------------------------
 def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alphabetically=True):
@@ -1620,6 +1668,8 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
         rows_html += f'<tr>{cells_html}</tr>'
 
     headers_html = "".join([f'<th>{h}</th>' for h in headers])
+    font_face_css = get_pdf_font_face_css()
+    pdf_font_stack = "'Tajawal', 'Segoe UI Semibold', 'Segoe UI', 'Calibri', 'Tahoma', 'Arial', sans-serif"
 
     html_doc = f"""
     <!DOCTYPE html>
@@ -1627,6 +1677,7 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
     <head>
         <meta charset="utf-8">
         <style>
+            {font_face_css}
             @page {{
                 size: {page_size} {page_orientation};
                 margin: 10mm 8mm;
@@ -1635,11 +1686,11 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
                     font-size: 9pt;
                     font-weight: normal;
                     color: #7A8AA3;
-                    font-family: Arial, sans-serif;
+                    font-family: {pdf_font_stack};
                 }}
             }}
             body {{
-                font-family: 'Segoe UI Semibold', 'Segoe UI', 'Calibri', 'Tahoma', 'Arial', sans-serif;
+                font-family: {pdf_font_stack};
                 font-weight: bold;
                 direction: rtl;
                 margin: 0;
@@ -1658,7 +1709,7 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
             }}
             .invoice-title {{
                 font-size: 15pt;
-                font-weight: bold;
+                font-weight: 800;
                 letter-spacing: 0.3px;
             }}
             .invoice-subtitle {{
