@@ -4,6 +4,7 @@ from io import BytesIO
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ALIGN_VERTICAL
+from docx.enum.style import WD_STYLE_TYPE
 from docx.shared import Cm, Pt, RGBColor, Inches
 from docx.oxml import parse_xml, OxmlElement
 from docx.oxml.ns import nsdecls, qn
@@ -121,45 +122,58 @@ def set_cell_no_wrap(cell):
     no_wrap = parse_xml(f'<w:noWrap {nsdecls("w")}/>')
     tcPr.append(no_wrap)
 
+def _get_or_create_char_style(doc, font_name, size_pt, bold, color_rgb):
+    """يبني نمط حرف (character style) مرة واحدة لكل توليفة (خط/حجم/غامق/لون) ويُعاد استخدامه
+    بالإشارة إليه (w:rStyle) بدل تكرار خصائص التنسيق الكاملة (rFonts/sz/b/color) داخل كل
+    خلية على حدة. هذا التكرار وحده كان يُضخّم حجم XML الداخلي للمستند بشدة في الملفات
+    الكبيرة (مثلاً 2.6 ميجابايت لـ1089 صف فقط) ويُثقل أداء Word عند الفتح والتمرير والتعديل،
+    رغم أن حجم الملف على القرص يبدو صغيراً بسبب الضغط."""
+    color_key = str(color_rgb) if color_rgb else "none"
+    safe_font = re.sub(r'[^A-Za-z0-9]', '', font_name) or "Font"
+    style_name = f"CellFmt_{safe_font}_{size_pt}_{int(bool(bold))}_{color_key}"
+    try:
+        return doc.styles[style_name]
+    except KeyError:
+        pass
+    style = doc.styles.add_style(style_name, WD_STYLE_TYPE.CHARACTER)
+    style.font.name = font_name
+    style.font.size = Pt(size_pt)
+    style.font.bold = bold
+    if color_rgb:
+        style.font.color.rgb = color_rgb
+    rPr = style.element.get_or_add_rPr()
+    rFonts = rPr.find(qn('w:rFonts'))
+    if rFonts is None:
+        rFonts = OxmlElement('w:rFonts')
+        rPr.insert(0, rFonts)
+    rFonts.set(qn('w:ascii'), font_name)
+    rFonts.set(qn('w:hAnsi'), font_name)
+    rFonts.set(qn('w:cs'), font_name)
+    return style
+
 def format_cell_advanced(cell, text, bold=False, color_rgb=None, size_pt=16, font_name="Calibri", align="center"):
     cell.text = str(text)
     p = cell.paragraphs[0]
-    
+
     if align == "right":
         p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     elif align == "left":
         p.alignment = WD_ALIGN_PARAGRAPH.LEFT
     else:
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        
+
     pPr = p.paragraph_format.element.get_or_add_pPr()
     pPr.append(parse_xml(f'<w:bidi {nsdecls("w")}/>'))
-    
+
+    style = _get_or_create_char_style(cell.part.document, font_name, size_pt, bold, color_rgb)
     for run in p.runs:
-        run.bold = bold
-        if color_rgb:
-            run.font.color.rgb = color_rgb
-            
-        rPr = run._r.get_or_add_rPr()
-        rFonts = OxmlElement('w:rFonts')
-        rFonts.set(qn('w:ascii'), font_name)
-        rFonts.set(qn('w:hAnsi'), font_name)
-        rFonts.set(qn('w:cs'), font_name)
-        rPr.append(rFonts)
-        run.font.size = Pt(size_pt)
+        run.style = style
 
 def _add_styled_run(p, text, bold, color_rgb, font_name, size_pt):
+    doc = p.part.document
+    style = _get_or_create_char_style(doc, font_name, size_pt, bold, color_rgb)
     run = p.add_run(text)
-    run.bold = bold
-    if color_rgb:
-        run.font.color.rgb = color_rgb
-    rPr = run._r.get_or_add_rPr()
-    rFonts = OxmlElement('w:rFonts')
-    rFonts.set(qn('w:ascii'), font_name)
-    rFonts.set(qn('w:hAnsi'), font_name)
-    rFonts.set(qn('w:cs'), font_name)
-    rPr.append(rFonts)
-    run.font.size = Pt(size_pt)
+    run.style = style
     return run
 
 def format_name_cell_with_small_suffix(cell, text, base_size=16, small_size=10, font_name="Calibri", bold=False, color_rgb=None, align="left"):
