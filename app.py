@@ -297,7 +297,10 @@ def _normalize_header_cell(cell):
 
 def _locate_header_row(rows_data):
     empty_idx_map = {"ت": -1, "اسم": -1, "كلي": -1, "مستحق": -1, "محجوب": -1, "بطاقة_قديم": -1, "بطاقة_حديث": -1}
-    required = ["اسم", "كلي", "مستحق", "محجوب"]
+    # "اسم" و"مستحق" فقط أساسيان في كل الملفات المعروفة؛ "كلي"/"محجوب"/رقم
+    # البطاقة أعمدة اختيارية غير موجودة في بعض القوالب (مثل ملف توزيع مواد
+    # غذائية بلا رقم بطاقة ولا عمود "كلي" منفصل).
+    required = ["اسم", "مستحق"]
 
     for i, row in enumerate(rows_data):
         # صف ترويسة حقيقي يتكوّن من خلايا عناوين منفصلة، لا فقرة نصية طويلة
@@ -345,7 +348,7 @@ def _locate_header_row(rows_data):
 
 def _extract_records_by_headers(rows_data, card_choice, name_length_choice):
     header_idx, idx_map = _locate_header_row(rows_data)
-    required = ["اسم", "كلي", "مستحق", "محجوب"]
+    required = ["اسم", "مستحق"]
     if header_idx == -1 or any(idx_map[k] == -1 for k in required):
         return None
 
@@ -381,8 +384,9 @@ def _extract_records_by_headers(rows_data, card_choice, name_length_choice):
 
         # عائلة حقيقية تضم فرداً واحداً على الأقل دائماً؛ "الكلي" = 0 يعني عملياً
         # أن هذا الصف ليس سجل عائلة (كصف توقيع/ملاحظة انزلق من جدول لاحق بالملف
-        # وصادف أن قيمة الاسم فيه بدت كاسم شخص حقيقي).
-        if get_num("كلي") == 0:
+        # وصادف أن قيمة الاسم فيه بدت كاسم شخص حقيقي). لا ينطبق هذا الفحص إن لم
+        # يوجد عمود "كلي" أصلاً بالملف (مثل قوالب توزيع مواد غذائية بلا عمود كلي).
+        if idx_map["كلي"] != -1 and get_num("كلي") == 0:
             continue
 
         final_name = " ".join(name_val.split()[:take])
@@ -425,7 +429,11 @@ def _validate_extracted_records(records):
             f"يرجى مراجعة ترويسة الملف الأصلي."
         )
 
-    exceeds = sum(1 for r in records if r.get("مستحق", 0) > r.get("الكلي", 0))
+    # عمود "الكلي" قد لا يوجد أصلاً في بعض القوالب (مثل توزيع مواد غذائية بلا
+    # عمود كلي منفصل)، وفي هذه الحالة تكون قيمته 0 لكل السجلات بلا استثناء —
+    # هذا لا يعني خطأ بتحديد الأعمدة، فلا داعي لفحص "مستحق > الكلي" عليه.
+    has_kuli_field = any(r.get("الكلي", 0) > 0 for r in records)
+    exceeds = sum(1 for r in records if r.get("مستحق", 0) > r.get("الكلي", 0)) if has_kuli_field else 0
     if exceeds:
         warnings.append(
             f"في {exceeds} من {n} سجل، \"مستحق\" أكبر من \"الكلي\" — وهذا غير منطقي (لا يمكن أن يتجاوز "
@@ -435,7 +443,9 @@ def _validate_extracted_records(records):
     card_keys = [k for k in records[0].keys() if k.startswith("رقم البطاقة")]
     for key in card_keys:
         missing_or_short = sum(1 for r in records if len(str(r.get(key, ""))) < 4)
-        if missing_or_short > n * 0.5:
+        # إن كان العمود فاضياً بالكامل (100%) فهذا يعني أن القالب المصدر لا
+        # يتضمن رقم بطاقة أصلاً (وليس خطأ قراءة) — لا تحذير في هذه الحالة.
+        if n * 0.5 < missing_or_short < n:
             warnings.append(
                 f"عمود \"{key}\" فاضي أو قصير جداً (أقل من 4 خانات) في أكثر من نصف السجلات "
                 f"({missing_or_short} من {n}) — يُحتمل أن قراءة رقم البطاقة من الملف الأصلي غير صحيحة."
@@ -1374,6 +1384,90 @@ def build_professional_word_report_v8(df, filename_base, card_choice, sort_alpha
 
     return save_doc_buffer(doc, df)
 
+# -----------------------------------------------------------------------------
+# النموذج التاسع: مطابق 100% لملف Word مرفوع من المستخدم (بدون عمود رقم بطاقة،
+# مواد غذائية محددة بألوان عناوين مميزة لكل مادة، عمود تاريخ). لا يستخدم
+# bidiVisual عمداً (الملف المصدر لا يستخدمه)، ولا يُطبّق تظليل أحمر للمستحق=صفر
+# (الملف المصدر لا يطبّق هذه الميزة على هذا النموذج بالتحديد).
+# -----------------------------------------------------------------------------
+def build_professional_word_report_v9(df, filename_base, card_choice, sort_alphabetically=True):
+    doc = Document()
+    setup_document_layout(doc, filename_base)
+
+    clean_name = filename_base
+    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج"]: clean_name = clean_name.replace(w, "")
+    clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', '', clean_name).split())
+
+    title_p = doc.add_paragraph()
+    title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    title_run = title_p.add_run(f"الكشف الإحصائي المنسق للوكيل: {clean_name}")
+    title_run.font.name, title_run.font.size, title_run.bold = "Segoe UI Semibold", Pt(14), True
+
+    dynamic_name_width = Cm(max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15) * 0.22 + 0.5)
+    headers = ["ت", "اسم رب الأسرة", "مستحق", "طحين", "سكر", "زيت", "رز", "معجون", "باقوليات", "التاريخ"]
+    col_widths = [Cm(1.13), dynamic_name_width, Cm(0.95)] + [Cm(1.52)] * 7
+
+    # لون ونمط كل عنوان مطابق تماماً لتصميم الملف الأصلي المرفوع (لكل مادة لون مميز خاص بها)
+    header_styles = {
+        "ت": {"color": "2A4B7C", "fill": None, "size": 12, "font": "Segoe UI Semibold"},
+        "اسم رب الأسرة": {"color": "2A4B7C", "fill": None, "size": 12, "font": "Segoe UI Semibold"},
+        "مستحق": {"color": "00B050", "fill": "DAEEF3", "size": 12, "font": "Calibri"},
+        "طحين": {"color": "FF0000", "fill": "E5DFEC", "size": 12, "font": "Segoe UI Semibold"},
+        "سكر": {"color": "2A4B7C", "fill": None, "size": 12, "font": "Segoe UI Semibold"},
+        "زيت": {"color": "FFC000", "fill": "EAF1DD", "size": 12, "font": "Segoe UI Semibold"},
+        "رز": {"color": "2A4B7C", "fill": "DBE5F1", "size": 18, "font": "Segoe UI Semibold"},
+        "معجون": {"color": "984806", "fill": "F2DBDB", "size": 12, "font": "Segoe UI Semibold"},
+        "باقوليات": {"color": "17365D", "fill": "F2F2F2", "size": 12, "font": "Segoe UI Semibold"},
+        "التاريخ": {"color": "17365D", "fill": "F2F2F2", "size": 12, "font": "Segoe UI Semibold"},
+    }
+
+    table = doc.add_table(rows=1, cols=len(headers))
+    table.style, table.alignment = 'Table Grid', WD_TABLE_ALIGNMENT.CENTER
+    set_table_borders(table, color_hex="2A4B7C")
+    table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
+    table.rows[0].height = Pt(50.4)
+
+    hdr_cells = table.rows[0].cells
+    for i, title in enumerate(headers):
+        cell = hdr_cells[i]
+        cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
+        style = header_styles[title]
+        format_cell_advanced(cell, title, bold=True, size_pt=style["size"], font_name=style["font"], align="center", color_rgb=RGBColor.from_string(style["color"]))
+        if style["fill"]:
+            set_cell_background(cell, style["fill"])
+
+    prev_letter = None
+    current_letter_color = "D4E6F1"
+    for idx, row in df.iterrows():
+        if sort_alphabetically:
+            letter = get_name_group_letter(row["اسم رب الأسرة"])
+            if letter != prev_letter:
+                current_letter_color = add_letter_banner_row(table, letter)
+                prev_letter = letter
+
+        new_row = table.add_row()
+        new_row.height = Pt(28.8)
+        row_cells = new_row.cells
+        new_row._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
+
+        for i in range(len(headers)):
+            cell = row_cells[i]
+            cell.width = col_widths[i]
+            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+            if i == 0:
+                format_cell_advanced(cell, row["ت"], size_pt=14, font_name="Calibri", align="center")
+                set_cell_background(cell, current_letter_color)
+            elif i == 1:
+                set_cell_no_wrap(cell)
+                format_cell_advanced(cell, row["اسم رب الأسرة"], size_pt=16, font_name="Calibri", align="right")
+            elif i == 2:
+                format_cell_advanced(cell, row["مستحق"], size_pt=14, font_name="Calibri", align="center")
+                set_cell_background(cell, "E8F8F5")
+            else:
+                format_cell_advanced(cell, "", size_pt=14, font_name="Calibri", align="center")
+
+    return save_doc_buffer(doc, df)
+
 # --- الدالة الجديدة للنموذج السابع (تفاصيل المواد) ---
 def build_professional_word_report_v7(df, filename_base, card_choice, sort_alphabetically=True):
     doc = Document()
@@ -1627,6 +1721,10 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
     elif template_choice == "النموذج السابع (تفصيل المواد الغذائية)":
         headers = ["ت"] + card_cols + ["اسم رب الأسرة", "الكلي", "المستحق", "المحجوب", "سكر", "زيت", "تمن", "معجون", "فاصوليا", "عدس", "حمص"] if is_combined else ["ت", "اسم رب الأسرة", card_choice, "الكلي", "المستحق", "المحجوب", "سكر", "زيت", "تمن", "معجون", "فاصوليا", "عدس", "حمص"]
         page_orientation = "landscape"
+    elif template_choice == "النموذج التاسع (توزيع مواد غذائية، بدون رقم بطاقة)":
+        headers = ["ت", "اسم رب الأسرة", "مستحق", "طحين", "سكر", "زيت", "رز", "معجون", "باقوليات", "التاريخ"]
+        page_size = "A4"
+        page_orientation = "portrait"
     else:
         headers = ["ت", "اسم رب الأسرة", "عدد الأفراد المستحقة", "حقل كبير فارغ", "حقل كبير فارغ"]
         page_size = "A3"
@@ -1768,6 +1866,12 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
                     (row["محجوب"], "background-color: #FADBD8;" if not is_eligible_zero else ""),
                     ("", ""), ("", ""), ("", ""), ("", ""), ("", ""), ("", ""), ("", "")
                 ]
+        elif template_choice == "النموذج التاسع (توزيع مواد غذائية، بدون رقم بطاقة)":
+            vals = [
+                (row["ت"], ter_bg),
+                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else "")
+            ] + [("", "")] * 7
         else:
             vals = [
                 (row["ت"], ter_bg),
@@ -1987,7 +2091,8 @@ with col3:
             "النموذج الخامس (ورقة A3، حقول كبيرة، خط Uighur)",
             "النموذج السادس (12 سلة، العدد المستحق)",
             "النموذج السابع (تفصيل المواد الغذائية)",
-            "النموذج الثامن (8 سلات، العدد المستحق)"
+            "النموذج الثامن (8 سلات، العدد المستحق)",
+            "النموذج التاسع (توزيع مواد غذائية، بدون رقم بطاقة)"
         ],
         index=0,
         horizontal=False
@@ -2088,6 +2193,8 @@ if st.session_state.processing_done:
             return build_professional_word_report_v7(df_final, output_filename, used_card_type, used_sort_alphabetically)
         elif used_template == "النموذج الثامن (8 سلات، العدد المستحق)":
             return build_professional_word_report_v8(df_final, output_filename, used_card_type, used_sort_alphabetically)
+        elif used_template == "النموذج التاسع (توزيع مواد غذائية، بدون رقم بطاقة)":
+            return build_professional_word_report_v9(df_final, output_filename, used_card_type, used_sort_alphabetically)
         else:
             return build_professional_word_report_v5(df_final, output_filename, used_card_type, used_sort_alphabetically)
 

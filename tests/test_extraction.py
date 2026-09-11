@@ -434,6 +434,42 @@ def test_file_number_column_not_treated_as_card():
           records is not None and records[0]["رقم البطاقة"] == "9988776", detail=str(records))
 
 
+# ---------------------------------------------------------------------------
+# 11) قالب توزيع مواد غذائية بلا رقم بطاقة ولا عمود "كلي"/"محجوب" منفصل (النموذج
+#     التاسع) — ملف حقيقي رُفع من المستخدم بهذا الشكل بالضبط، كان يفشل بالكامل
+#     («لم يتم العثور على جداول بيانات متوافقة») لأن required كانت تفرض وجود
+#     كلي/محجوب في كل الملفات. اسم + مستحق فقط هما الأساسيان الآن.
+# ---------------------------------------------------------------------------
+def test_material_distribution_template_without_card_or_total_columns():
+    rows_data = [
+        ["ت", "اسم رب الأسرة", "المستحق", "طحين", "سكر", "زيت", "رز", "معجون", "باقوليات", "التاريخ"],
+        ["1", "ابراهيم كيطان حسين النعامنه", "0", "", "", "", "", "", "", ""],
+        ["2", "ابراهيم مطشر علي", "6", "", "", "", "", "", "", ""],
+        ["3", "احمد سعدون عبد الكريم", "2", "", "", "", "", "", "", ""],
+    ]
+    header_idx, idx_map = app._locate_header_row(rows_data)
+    check("material_template: header row found despite missing كلي/محجوب/بطاقة",
+          header_idx == 0, detail=str((header_idx, idx_map)))
+    check("material_template: كلي/محجوب/بطاقة correctly absent (idx -1), not required",
+          idx_map["كلي"] == -1 and idx_map["محجوب"] == -1 and idx_map["بطاقة_قديم"] == -1,
+          detail=str(idx_map))
+
+    records = app._extract_records_by_headers(rows_data, "رقم البطاقة القديم", "الاسم الثلاثي فقط")
+    check("material_template: all 3 real rows extracted, none dropped as كلي=0",
+          records is not None and len(records) == 3, detail=str(records))
+    check("material_template: مستحق=0 row (real family, ineligible this month) kept",
+          records is not None and records[0]["مستحق"] == 0, detail=str(records))
+    check("material_template: مستحق values correct for the other two rows",
+          records is not None and records[1]["مستحق"] == 6 and records[2]["مستحق"] == 2,
+          detail=str(records))
+
+    warnings = app._validate_extracted_records(records)
+    check("material_template: no false 'مستحق > الكلي' warning (الكلي doesn't exist in this template)",
+          not any("أكبر من" in w for w in warnings), detail=str(warnings))
+    check("material_template: no false 'missing card number' warning (this template has no card column)",
+          not any("رقم البطاقة" in w for w in warnings), detail=str(warnings))
+
+
 def main():
     tests = [
         test_real_world_layout_with_blank_column,
@@ -458,6 +494,7 @@ def main():
         test_empty_header_result_is_falsy_not_none,
         test_trailing_signature_row_not_captured_as_bogus_record,
         test_file_number_column_not_treated_as_card,
+        test_material_distribution_template_without_card_or_total_columns,
     ]
     for t in tests:
         try:
