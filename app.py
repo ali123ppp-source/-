@@ -2279,6 +2279,10 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
                 white-space: nowrap;
                 font-weight: bold;
             }}
+            tbody tr {{
+                page-break-inside: avoid;
+                break-inside: avoid;
+            }}
             tbody tr:nth-child(even) td {{
                 background-color: #F6F9FC;
             }}
