@@ -347,44 +347,88 @@ def test_no_matching_header_returns_none():
 
 
 # ---------------------------------------------------------------------------
-# 7) extract_and_clean_data الآن يرجع (df, warnings) كـ tuple.
+# 7) extract_and_clean_data يرجع (df, warnings, agent_metadata) كـ tuple.
 # ---------------------------------------------------------------------------
-def test_extract_and_clean_data_returns_tuple():
-    class FakeUpload:
-        def __init__(self, rows):
-            import io
-            from docx import Document
-            doc = Document()
-            table = doc.add_table(rows=1, cols=len(rows[0]))
-            for i, text in enumerate(rows[0]):
-                table.rows[0].cells[i].text = text
-            for row in rows[1:]:
-                cells = table.add_row().cells
-                for i, text in enumerate(row):
-                    cells[i].text = text
-            buf = io.BytesIO()
-            doc.save(buf)
-            buf.seek(0)
-            self._buf = buf
-            self.name = "test.docx"
-        def read(self, *a, **k):
-            return self._buf.read(*a, **k)
-        def seek(self, *a, **k):
-            return self._buf.seek(*a, **k)
-        def __getattr__(self, item):
-            return getattr(self._buf, item)
+class FakeDocxUpload:
+    def __init__(self, rows, paragraphs=None):
+        import io
+        from docx import Document
+        doc = Document()
+        for text in (paragraphs or []):
+            doc.add_paragraph(text)
+        table = doc.add_table(rows=1, cols=len(rows[0]))
+        for i, text in enumerate(rows[0]):
+            table.rows[0].cells[i].text = text
+        for row in rows[1:]:
+            cells = table.add_row().cells
+            for i, text in enumerate(row):
+                cells[i].text = text
+        buf = io.BytesIO()
+        doc.save(buf)
+        buf.seek(0)
+        self._buf = buf
+        self.name = "test.docx"
+    def read(self, *a, **k):
+        return self._buf.read(*a, **k)
+    def seek(self, *a, **k):
+        return self._buf.seek(*a, **k)
+    def __getattr__(self, item):
+        return getattr(self._buf, item)
 
+
+def test_extract_and_clean_data_returns_tuple():
     rows = [
         ["ت", "اسم رب الأسرة", "رقم البطاقة", "الكلي", "مستحق", "محجوب"],
         ["1", "زينب عباس كاظم", "1234567", "4", "4", "0"],
     ]
-    upload = FakeUpload(rows)
+    upload = FakeDocxUpload(rows)
     result = app.extract_and_clean_data(upload, "رقم البطاقة القديم", "الاسم الثلاثي فقط", True)
-    check("extract_and_clean_data: returns a 2-tuple", isinstance(result, tuple) and len(result) == 2,
+    check("extract_and_clean_data: returns a 3-tuple", isinstance(result, tuple) and len(result) == 3,
           detail=str(type(result)))
-    df, warnings = result
+    df, warnings, metadata = result
     check("extract_and_clean_data: df has one row", len(df) == 1, detail=str(df))
     check("extract_and_clean_data: warnings is a list", isinstance(warnings, list))
+    check("extract_and_clean_data: metadata is a dict", isinstance(metadata, dict))
+
+
+# ---------------------------------------------------------------------------
+# 12) بيانات الوكيل (مركز/رقم وكالة/اسم وكيل) تُستخرج من فقرات docx بصيغة
+#     "تسمية: قيمة" تسبق الجدول — ملف حقيقي رفعه المستخدم كان بهذا الشكل
+#     بالضبط (يستخدمها الآن غلاف الملف المُولَّد بدل البنر السابق).
+# ---------------------------------------------------------------------------
+def test_agent_metadata_extracted_from_docx_paragraphs():
+    rows = [
+        ["ت", "اسم رب الأسرة", "رقم البطاقة", "الكلي", "مستحق", "محجوب"],
+        ["1", "زينب عباس كاظم", "1234567", "4", "4", "0"],
+    ]
+    paragraphs = [
+        "بيانات وكيل البطاقة التموينية",
+        "رقم المركز: 625",
+        "رقم الوكالة: 038461",
+        "اسم الوكيل: شيكار حايف كريم",
+    ]
+    upload = FakeDocxUpload(rows, paragraphs=paragraphs)
+    df, warnings, metadata = app.extract_and_clean_data(upload, "رقم البطاقة القديم", "الاسم الثلاثي فقط", True)
+    check("agent_metadata: مركز extracted", metadata.get("مركز") == "625", detail=str(metadata))
+    check("agent_metadata: رقم_الوكالة extracted", metadata.get("رقم_الوكالة") == "038461", detail=str(metadata))
+    check("agent_metadata: اسم_الوكيل extracted", metadata.get("اسم_الوكيل") == "شيكار حايف كريم", detail=str(metadata))
+    check("agent_metadata: table extraction still works unaffected", len(df) == 1, detail=str(df))
+
+
+def test_agent_metadata_from_table_cells_like_real_xlsx():
+    # النمط الحقيقي بملف xlsx حقيقي رفعه المستخدم: التسمية والقيمة بخليتين
+    # متجاورتين بنفس الصف (لا فقرة نصية)، مع خلية فارغة تسبقهما أحياناً.
+    rows_data = [
+        ["", "بيانات وكيل البطاقة التموينية", "", "", "", ""],
+        ["", "", "", "", "", ""],
+        ["", "رقم المركز", "625", "", "", ""],
+        ["", "رقم الوكالة", "038461", "", "", ""],
+        ["", "اسم الوكيل", "شيكار حايف كريم", "", "", ""],
+    ]
+    metadata = app._extract_agent_metadata(rows_data)
+    check("agent_metadata(table cells): مركز", metadata["مركز"] == "625", detail=str(metadata))
+    check("agent_metadata(table cells): رقم_الوكالة", metadata["رقم_الوكالة"] == "038461", detail=str(metadata))
+    check("agent_metadata(table cells): اسم_الوكيل", metadata["اسم_الوكيل"] == "شيكار حايف كريم", detail=str(metadata))
 
 
 # ---------------------------------------------------------------------------
@@ -495,6 +539,8 @@ def main():
         test_trailing_signature_row_not_captured_as_bogus_record,
         test_file_number_column_not_treated_as_card,
         test_material_distribution_template_without_card_or_total_columns,
+        test_agent_metadata_extracted_from_docx_paragraphs,
+        test_agent_metadata_from_table_cells_like_real_xlsx,
     ]
     for t in tests:
         try:

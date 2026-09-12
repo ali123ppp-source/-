@@ -467,21 +467,57 @@ def _validate_extracted_records(records):
 
     return warnings
 
+# الملفات الحقيقية غالباً تحمل كتلة بيانات صغيرة عن الوكيل (رقم المركز، رقم
+# الوكالة، اسم الوكيل) قبل جدول البيانات نفسه، على هيئة "تسمية: قيمة" أو خليتين
+# متجاورتين. تُستخرج هنا لاستخدامها في صفحة الواجهة، بمعزل تام عن استخراج
+# سجلات الجدول (لا تؤثر فيه ولا تتأثر به).
+_AGENT_METADATA_FIELD_MAP = {
+    "رقم المركز": "مركز", "المركز": "مركز",
+    "رقم الوكالة": "رقم_الوكالة",
+    "اسم الوكيل": "اسم_الوكيل", "اسم الوكالة": "اسم_الوكيل",
+}
+
+def _extract_agent_metadata(rows_data):
+    metadata = {"مركز": "", "رقم_الوكالة": "", "اسم_الوكيل": ""}
+    for row in rows_data:
+        cells = [str(c).strip() for c in row if str(c).strip()]
+        if len(cells) < 2:
+            continue
+        label_norm = _normalize_header_cell(cells[0])
+        for label, key in _AGENT_METADATA_FIELD_MAP.items():
+            if metadata[key]:
+                continue
+            if _normalize_header_cell(label) == label_norm:
+                metadata[key] = cells[1]
+                break
+    return metadata
+
 # -----------------------------------------------------------------------------
 # محرك قراءة وتنظيف البيانات المطور
 # -----------------------------------------------------------------------------
 def extract_and_clean_data(file_obj, card_choice, name_length_choice, sort_alphabetically=True):
     raw_records = []
     rows_data = []
+    # مصدر منفصل تماماً لاستخراج بيانات الوكيل (مركز/رقم وكالة/اسم) — لا يُمرَّر
+    # أبداً لمحرك استخراج سجلات الجدول، فلا خطر من أي تأثير متبادل بينهما.
+    metadata_rows = []
 
     file_ext = file_obj.name.split('.')[-1].lower()
 
     if file_ext == 'docx':
         doc = Document(file_obj)
+        for para in doc.paragraphs:
+            text = para.text.strip()
+            if not text:
+                continue
+            label, sep, value = text.partition(":")
+            if sep and value.strip():
+                metadata_rows.append([label.strip(), value.strip()])
         for table in doc.tables:
             for row in table.rows:
                 cells = [cell.text.strip().replace('\n', ' ') for cell in row.cells]
                 rows_data.append(cells)
+                metadata_rows.append(cells)
 
     elif file_ext == 'xlsx':
         xls = pd.ExcelFile(file_obj)
@@ -497,6 +533,9 @@ def extract_and_clean_data(file_obj, card_choice, name_length_choice, sort_alpha
                     else:
                         cells.append(str(cell).strip().replace('\n', ' '))
                 rows_data.append(cells)
+                metadata_rows.append(cells)
+
+    agent_metadata = _extract_agent_metadata(metadata_rows)
 
     header_records = _extract_records_by_headers(rows_data, card_choice, name_length_choice)
     if header_records:
@@ -506,7 +545,7 @@ def extract_and_clean_data(file_obj, card_choice, name_length_choice, sort_alpha
             if sort_alphabetically:
                 df = df.sort_values(by="اسم رب الأسرة").reset_index(drop=True)
             df.insert(0, "ت", df.index + 1)
-        return df, warnings
+        return df, warnings, agent_metadata
 
     for cells in rows_data:
         if not any(cells) or "المركز" in "".join(cells) or "الوكيل" in "".join(cells) or "اسم رب" in "".join(cells):
@@ -566,7 +605,7 @@ def extract_and_clean_data(file_obj, card_choice, name_length_choice, sort_alpha
         if sort_alphabetically:
             df = df.sort_values(by="اسم رب الأسرة").reset_index(drop=True)
         df.insert(0, "ت", df.index + 1)
-    return df, warnings
+    return df, warnings, agent_metadata
 
 # -----------------------------------------------------------------------------
 # دوال إنشاء النماذج (1 إلى 7) بصيغة Word
@@ -1670,6 +1709,19 @@ def _get_embedded_font_base64(filename):
     except OSError:
         return None
 
+ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+
+@lru_cache(maxsize=None)
+def _get_ministry_of_trade_logo_base64():
+    """شعار وزارة التجارة العراقية لصفحة الواجهة، إن كان الملف متوفراً بمجلد
+    assets — وإلا (لم يُرفع بعد) تُستخدم واجهة نائبة أنيقة بدل الشعار."""
+    path = os.path.join(ASSETS_DIR, "mot_logo.png")
+    try:
+        with open(path, "rb") as f:
+            return base64.b64encode(f.read()).decode("ascii")
+    except OSError:
+        return None
+
 @lru_cache(maxsize=None)
 def get_pdf_font_face_css():
     """يبني قواعد @font-face لخط Tajawal (عادي/بولد/إكسترا بولد) إن كانت الملفات متوفرة،
@@ -1703,10 +1755,11 @@ def get_pdf_font_face_css():
 # -----------------------------------------------------------------------------
 # المحرك الجديد: إنشاء تقارير PDF
 # -----------------------------------------------------------------------------
-def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort_alphabetically=True):
+def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort_alphabetically=True, agent_metadata=None):
     """يبني نص HTML الكامل للكشف (نفس التصميم المستخدم لملف PDF)، بمعزل عن
     خطوة التحويل لـPDF، حتى تُعاد استخدامه أيضاً لتوليد نسخة HTML تفاعلية
     قابلة للتعديل والطباعة مباشرة من المتصفح."""
+    agent_metadata = agent_metadata or {}
     clean_name = filename_base
     for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج"]: clean_name = clean_name.replace(w, "")
     clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', '', clean_name).split())
@@ -2020,6 +2073,19 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
     font_face_css = get_pdf_font_face_css()
     pdf_font_stack = "'Tajawal', 'Segoe UI Semibold', 'Segoe UI', 'Calibri', 'Tahoma', 'Arial', sans-serif"
 
+    # صفحة واجهة رسمية أول كل ملف (تحل محل البنر السابق أعلى الجدول): اسم
+    # الوزارة، شعارها، عنوان يعكس طريقة الترتيب، وبيانات الوكيل المستخرجة من
+    # الملف الأصلي إن وُجدت (فراغ أنيق بدل الحقل إن لم تتوفر بدل إظهار خطأ).
+    cover_title = "سجل حسب الترتيب الأبجدي" if sort_alphabetically else "سجل توزيع"
+    cover_agency_name = agent_metadata.get("اسم_الوكيل") or clean_name
+    cover_agency_number = agent_metadata.get("رقم_الوكالة") or ""
+    cover_center = agent_metadata.get("مركز") or ""
+    mot_logo_b64 = _get_ministry_of_trade_logo_base64()
+    cover_logo_html = (
+        f'<img class="cover-logo" src="data:image/png;base64,{mot_logo_b64}" alt="شعار وزارة التجارة العراقية">'
+        if mot_logo_b64 else '<div class="cover-logo cover-logo-placeholder">شعار<br>الوزارة</div>'
+    )
+
     html_doc = f"""
     <!DOCTYPE html>
     <html dir="rtl" lang="ar">
@@ -2059,17 +2125,129 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
                 border-radius: 20px;
                 overflow: hidden;
             }}
-            .invoice-header {{
-                background-color: #1B3A63;
-                color: #FFFFFF;
-                padding: 14px 20px 12px;
-                border-bottom: 4px solid #D4AC0D;
+            @page cover {{
+                size: A4 portrait;
+                margin: 18mm;
             }}
-            .invoice-title {{
-                font-size: 19pt;
+            .cover-page {{
+                page: cover;
+                page-break-after: always;
+                display: flex;
+                flex-direction: column;
+                justify-content: space-between;
+                height: 100%;
+                min-height: 261mm;
+                background: #FFFFFF;
+                border: 2.5px solid #1B3A63;
+                border-radius: 22px;
+                padding: 14mm 16mm;
+                box-sizing: border-box;
+            }}
+            .cover-header-table {{
+                width: 100%;
+                border-collapse: collapse;
+            }}
+            .cover-header-table td {{
+                border: none;
+                padding: 0;
+                vertical-align: top;
+                white-space: normal;
+            }}
+            .cover-header-spacer, .cover-header-logo-cell {{
+                width: 32mm;
+                text-align: center;
+            }}
+            .cover-header-center {{
+                text-align: center;
+            }}
+            .cover-ministry-name {{
+                font-size: 27pt;
                 font-weight: 800;
+                color: #1B3A63;
+                letter-spacing: 0.5px;
+            }}
+            .cover-ministry-sub {{
+                font-size: 11pt;
+                font-weight: normal;
+                color: #5D6D7E;
+                margin-top: 3mm;
                 letter-spacing: 0.3px;
-                white-space: nowrap;
+            }}
+            .cover-logo, .cover-logo-placeholder {{
+                width: 28mm;
+                height: 28mm;
+                display: inline-block;
+            }}
+            .cover-logo-placeholder {{
+                border: 1.5px dashed #9AA7B8;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                text-align: center;
+                font-size: 9pt;
+                font-weight: bold;
+                color: #9AA7B8;
+                line-height: 1.4;
+            }}
+            .cover-gold-rule {{
+                width: 60mm;
+                height: 3px;
+                background-color: #D4AC0D;
+                margin: 8mm auto 0;
+                border-radius: 2px;
+            }}
+            .cover-title-badge {{
+                display: inline-block;
+                margin: 14mm auto 0;
+                padding: 4mm 18mm;
+                background-color: #EAF0F8;
+                border: 1.5px solid #1B3A63;
+                border-radius: 999px;
+                font-size: 16pt;
+                font-weight: 800;
+                color: #1B3A63;
+            }}
+            .cover-title-wrap {{
+                text-align: center;
+            }}
+            .cover-meta {{
+                width: 100%;
+                max-width: 140mm;
+                margin: 16mm auto 0;
+                border-collapse: collapse;
+            }}
+            .cover-meta tr {{
+                border-bottom: 1px solid #DCE4F0;
+            }}
+            .cover-meta td {{
+                border: none;
+                padding: 5mm 2mm;
+                font-size: 13pt;
+                text-align: right;
+                white-space: normal;
+            }}
+            .cover-meta .cover-meta-label {{
+                color: #1B3A63;
+                font-weight: 800;
+                width: 40mm;
+            }}
+            .cover-meta .cover-meta-value {{
+                color: #222;
+                font-weight: 700;
+                text-align: right;
+            }}
+            .cover-meta .cover-date-value {{
+                letter-spacing: 3px;
+                font-weight: 800;
+                color: #222;
+            }}
+            .cover-footer-note {{
+                text-align: center;
+                font-size: 9pt;
+                color: #9AA7B8;
+                margin-top: auto;
+                padding-top: 10mm;
             }}
             .pill {{
                 display: inline-block;
@@ -2086,12 +2264,6 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
             }}
             table.compact {{
                 table-layout: fixed;
-            }}
-            .invoice-subtitle {{
-                font-size: 9pt;
-                font-weight: normal;
-                opacity: 0.85;
-                margin-top: 4px;
             }}
             table {{
                 width: 100%;
@@ -2132,11 +2304,30 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
         </style>
     </head>
     <body>
-        <div class="invoice-card">
-            <div class="invoice-header">
-                <div class="invoice-title">الكشف الإحصائي المنسق للوكيل: {clean_name}</div>
-                <div class="invoice-subtitle">سجل إلكتروني رسمي — نظام تنسيق كشوفات الوكلاء</div>
+        <div class="cover-page">
+            <table class="cover-header-table">
+                <tr>
+                    <td class="cover-header-logo-cell">{cover_logo_html}</td>
+                    <td class="cover-header-center">
+                        <div class="cover-ministry-name">وزارة التجارة العراقية</div>
+                        <div class="cover-ministry-sub">سجل إلكتروني رسمي — نظام تنسيق كشوفات الوكلاء</div>
+                    </td>
+                    <td class="cover-header-spacer"></td>
+                </tr>
+            </table>
+            <div class="cover-gold-rule"></div>
+            <div class="cover-title-wrap">
+                <div class="cover-title-badge">{cover_title}</div>
             </div>
+            <table class="cover-meta">
+                <tr><td class="cover-meta-label">وكالة الوكيل</td><td class="cover-meta-value">{cover_agency_name}</td></tr>
+                <tr><td class="cover-meta-label">رقم الوكالة</td><td class="cover-meta-value">{cover_agency_number}</td></tr>
+                <tr><td class="cover-meta-label">المركز</td><td class="cover-meta-value">{cover_center}</td></tr>
+                <tr><td class="cover-meta-label">التاريخ</td><td class="cover-meta-value cover-date-value">&nbsp;&nbsp;&nbsp;/&nbsp;&nbsp;&nbsp;/&nbsp;&nbsp;2026</td></tr>
+            </table>
+            <div class="cover-footer-note">{clean_name}</div>
+        </div>
+        <div class="invoice-card">
             <table class="{table_class}">
                 {colgroup_html}
                 <thead>
@@ -2160,9 +2351,9 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
     return html_doc, page_size, page_orientation, headers
 
 
-def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alphabetically=True):
+def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alphabetically=True, agent_metadata=None):
     html_doc, page_size, page_orientation, _headers = _build_report_html_doc(
-        df, filename_base, card_choice, template_choice, sort_alphabetically
+        df, filename_base, card_choice, template_choice, sort_alphabetically, agent_metadata
     )
 
     if WEASYPRINT_AVAILABLE:
@@ -2269,9 +2460,9 @@ if st.button("⚙️ تشغيل محرك التنظيم والتنسيق الم�
                 extracted = []
                 file_warnings = {}
                 for f in uploaded_files:
-                    df_res, extraction_warnings = extract_and_clean_data(f, selected_card, name_length_choice, sort_alphabetically)
+                    df_res, extraction_warnings, agent_metadata = extract_and_clean_data(f, selected_card, name_length_choice, sort_alphabetically)
                     if not df_res.empty:
-                        extracted.append({"filename": f.name.rsplit('.', 1)[0], "df": df_res})
+                        extracted.append({"filename": f.name.rsplit('.', 1)[0], "df": df_res, "metadata": agent_metadata})
                         log_processed_file(f.name, len(df_res), selected_card, name_length_choice, template_choice, sort_choice)
                         if extraction_warnings:
                             file_warnings[f.name] = extraction_warnings
@@ -2286,7 +2477,9 @@ if st.button("⚙️ تشغيل محرك التنظيم والتنسيق الم�
                             merged_filename = "مدمج_" + "_".join([e["filename"][:10] for e in extracted])
                         else:
                             merged_filename = extracted[0]["filename"]
-                        results = [{"filename": merged_filename, "df": merged_df}]
+                        # عند الدمج: بيانات وكيل الملف الأول تُستخدم كافتراض لصفحة
+                        # الواجهة (لا يوجد وكيل واحد يمثل كل الملفات المدموجة).
+                        results = [{"filename": merged_filename, "df": merged_df, "metadata": extracted[0]["metadata"]}]
                     else:
                         results = extracted
 
@@ -2343,6 +2536,7 @@ if st.session_state.processing_done:
     for idx, item in enumerate(results):
         df_final = item["df"]
         output_filename = item["filename"]
+        agent_metadata = item.get("metadata", {})
 
         st.markdown(f"---\n#### 📄 {output_filename} — ({len(df_final)}) قيد اسم")
 
@@ -2363,7 +2557,7 @@ if st.session_state.processing_done:
         with dl_col2:
             if PDFKIT_AVAILABLE or WEASYPRINT_AVAILABLE:
                 try:
-                    pdf_output = build_pdf_report(df_final, output_filename, used_card_type, used_template, used_sort_alphabetically)
+                    pdf_output = build_pdf_report(df_final, output_filename, used_card_type, used_template, used_sort_alphabetically, agent_metadata)
                     st.download_button(
                         label="📕 تحميل الكشف المنسق (PDF جاهز للطباعة)",
                         data=pdf_output,
