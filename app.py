@@ -1703,7 +1703,10 @@ def get_pdf_font_face_css():
 # -----------------------------------------------------------------------------
 # المحرك الجديد: إنشاء تقارير PDF
 # -----------------------------------------------------------------------------
-def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alphabetically=True):
+def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort_alphabetically=True):
+    """يبني نص HTML الكامل للكشف (نفس التصميم المستخدم لملف PDF)، بمعزل عن
+    خطوة التحويل لـPDF، حتى تُعاد استخدامه أيضاً لتوليد نسخة HTML تفاعلية
+    قابلة للتعديل والطباعة مباشرة من المتصفح."""
     clean_name = filename_base
     for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج"]: clean_name = clean_name.replace(w, "")
     clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', '', clean_name).split())
@@ -1767,14 +1770,14 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
 
         cells_html = ""
 
-        card_vals = [(row["رقم البطاقة القديم"], ""), (row["رقم البطاقة الحديث"], "")] if is_combined else [(row["رقم البطاقة"], "")]
+        card_vals = [(row["رقم البطاقة القديم"], "font-size: 11.07pt;"), (row["رقم البطاقة الحديث"], "font-size: 11.07pt;")] if is_combined else [(row["رقم البطاقة"], "font-size: 11.07pt;")]
 
         if template_choice == "النموذج الأول (الأصلي المطور)":
             if is_combined:
                 vals = [
                     (row["ت"], ter_bg),
                     *card_vals,
-                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 18.4pt; white-space: normal;"),
+                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 14pt;"),
                     ("x" if is_eligible_zero else "", ""),
                     (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
                     (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
@@ -1784,7 +1787,7 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
             else:
                 vals = [
                     (row["ت"], ter_bg),
-                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 18.4pt; white-space: normal;"),
+                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 14pt;"),
                     ("x" if is_eligible_zero else "", ""),
                     (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
                     (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
@@ -1797,7 +1800,7 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
                 vals = [
                     (row["ت"], ter_bg),
                     *card_vals,
-                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 18.4pt; white-space: normal;"),
+                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 14pt;"),
                     ("x" if is_eligible_zero else "", ""),
                     ("x" if is_eligible_zero else "", ""),
                     (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
@@ -1808,7 +1811,7 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
             else:
                 vals = [
                     (row["ت"], ter_bg),
-                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 18.4pt; white-space: normal;"),
+                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 14pt;"),
                     ("x" if is_eligible_zero else "", ""),
                     ("x" if is_eligible_zero else "", ""),
                     (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
@@ -1822,7 +1825,7 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
                 vals = [
                     (row["ت"], ter_bg),
                     *card_vals,
-                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 18.4pt; white-space: normal;"),
+                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 14pt;"),
                     (row["الكلي"], "background-color: #E5E7E9;" if not is_eligible_zero else ""),
                     (row["مستحق"], ""),
                     (row["محجوب"], "background-color: #FCF3CF;" if not is_eligible_zero else ""),
@@ -1831,7 +1834,7 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
             else:
                 vals = [
                     (row["ت"], ter_bg),
-                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 18.4pt; white-space: normal;"),
+                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 14pt;"),
                     *card_vals,
                     (row["الكلي"], "background-color: #E5E7E9;" if not is_eligible_zero else ""),
                     (row["مستحق"], ""),
@@ -1842,21 +1845,21 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
             vals = [
                 (row["ت"], ter_bg),
                 *card_vals,
-                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 18.4pt; white-space: normal;"),
+                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 14pt;"),
                 (row["الكلي"], "background-color: #E8F8F5;" if not is_eligible_zero else "")
             ] + [("", "")] * 12
         elif template_choice == "النموذج السادس (12 سلة، العدد المستحق)":
             vals = [
                 (row["ت"], ter_bg),
                 *card_vals,
-                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 18.4pt; white-space: normal;"),
+                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 14pt;"),
                 (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else "")
             ] + [("", "")] * 12
         elif template_choice == "النموذج الثامن (8 سلات، العدد المستحق)":
             vals = [
                 (row["ت"], ter_bg),
                 *card_vals,
-                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 18.4pt; white-space: normal;"),
+                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 14pt;"),
                 (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else "")
             ] + [("", "")] * 8
         elif template_choice == "النموذج السابع (تفصيل المواد الغذائية)":
@@ -1864,7 +1867,7 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
                 vals = [
                     (row["ت"], ter_bg),
                     *card_vals,
-                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 18.4pt; white-space: normal;"),
+                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 14pt;"),
                     (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
                     (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
                     (row["محجوب"], "background-color: #FADBD8;" if not is_eligible_zero else ""),
@@ -1873,7 +1876,7 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
             else:
                 vals = [
                     (row["ت"], ter_bg),
-                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 18.4pt; white-space: normal;"),
+                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 14pt;"),
                     *card_vals,
                     (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
                     (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
@@ -1883,13 +1886,13 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
         elif template_choice == "النموذج التاسع (توزيع مواد غذائية، بدون رقم بطاقة)":
             vals = [
                 (row["ت"], ter_bg),
-                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 18.4pt; white-space: normal;"),
+                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 14pt;"),
                 (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else "")
             ] + [("", "")] * 7
         else:
             vals = [
                 (row["ت"], ter_bg),
-                (row["اسم رب الأسرة"], f"text-align: right; font-weight: bold; font-size: 18.4pt; white-space: normal; color: {'#FF0000' if is_eligible_zero else '#0070C0'};"),
+                (row["اسم رب الأسرة"], f"text-align: right; font-weight: bold; font-size: 14pt; color: {'#FF0000' if is_eligible_zero else '#0070C0'};"),
                 ("x" if is_eligible_zero else row["مستحق"], ""),
                 ("XXXXXXXXXXXX" if is_eligible_zero else "", ""),
                 ("XXXXXXXXXXXX" if is_eligible_zero else "", "")
@@ -1930,15 +1933,15 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
     # فيها، فتتقاسم ما تبقى من المساحة بحسب طول عنوانها.
     def _critical_pct(h):
         if h in COMPACT_HEADERS:
-            return max(len(h) * 1.3, 11.5)
+            return max(len(h) * 1.3, 11.5) * 0.85
         if h == "ت":
-            return 3.0
+            return 6.0
         if "اسم" in h:
             return 20.0
         if h == "ملاحظات":
             return 6.0
         if "بطاق" in h or "تموين" in h or h in ("القديم", "الحديث"):
-            return 8.5
+            return 10.2
         return None
 
     table_class = ""
@@ -1966,6 +1969,18 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
                     resolved_widths[i] -= cut
                     freed += cut
             resolved_widths[notes_idx] += freed
+
+        # طلب صريح: تصغير عمود "حقل فارغ" (الحقل بلا بيانات حقيقية) بمقدار
+        # 50% من عرضه الطبيعي، وتحويل المساحة المُحرَّرة لعمود الاسم.
+        blank_indices = [i for i, h in enumerate(headers) if h.startswith("حقل فارغ")]
+        name_idx = next((i for i, h in enumerate(headers) if "اسم" in h), None)
+        if blank_indices and name_idx is not None:
+            freed_blank = 0.0
+            for i in blank_indices:
+                cut = resolved_widths[i] * 0.5
+                resolved_widths[i] -= cut
+                freed_blank += cut
+            resolved_widths[name_idx] += freed_blank
         colgroup_html = "<colgroup>" + "".join(f'<col style="width:{w:.2f}%">' for w in resolved_widths) + "</colgroup>"
     font_face_css = get_pdf_font_face_css()
     pdf_font_stack = "'Tajawal', 'Segoe UI Semibold', 'Segoe UI', 'Calibri', 'Tahoma', 'Arial', sans-serif"
@@ -2031,7 +2046,8 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
             .pill-green {{ background-color: #D3F3E8; color: #117864; }}
             .pill-red {{ background-color: #FBD9D3; color: #C0392B; }}
             .pill-tight {{
-                padding: 3px 5px;
+                padding: 3px 1px;
+                font-size: 12.5pt;
             }}
             table.compact {{
                 table-layout: fixed;
@@ -2106,7 +2122,14 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
     </body>
     </html>
     """
-    
+    return html_doc, page_size, page_orientation, headers
+
+
+def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alphabetically=True):
+    html_doc, page_size, page_orientation, _headers = _build_report_html_doc(
+        df, filename_base, card_choice, template_choice, sort_alphabetically
+    )
+
     if WEASYPRINT_AVAILABLE:
         pdf_buffer = BytesIO()
         HTML(string=html_doc).write_pdf(pdf_buffer)
