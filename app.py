@@ -1939,7 +1939,7 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
         elif template_choice == "النموذج التاسع (توزيع مواد غذائية، بدون رقم بطاقة)":
             vals = [
                 (row["ت"], ter_bg),
-                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 14pt;"),
+                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 12pt;"),
                 (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else "")
             ] + [("", "")] * 7
         else:
@@ -1971,17 +1971,31 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
     max_name_len = df[name_col_key].astype(str).str.len().max() if name_col_key and not df.empty else 15
     use_compact_columns = any(h in COMPACT_HEADERS for h in headers)
 
-    def _header_cell_html(h):
+    def _header_cell_html(h, extra_style=""):
         pill_extra = " pill-tight" if use_compact_columns else ""
+        style_attr = f' style="{extra_style}"' if extra_style else ""
         if "كلي" in h:
-            return f'<th><span class="pill{pill_extra} pill-blue">{h}</span></th>'
+            return f'<th><span class="pill{pill_extra} pill-blue"{style_attr}>{h}</span></th>'
         if "مستحق" in h:
-            return f'<th><span class="pill{pill_extra} pill-green">{h}</span></th>'
+            return f'<th><span class="pill{pill_extra} pill-green"{style_attr}>{h}</span></th>'
         if "محجوب" in h:
-            return f'<th><span class="pill{pill_extra} pill-red">{h}</span></th>'
-        return f'<th>{h}</th>'
+            return f'<th><span class="pill{pill_extra} pill-red"{style_attr}>{h}</span></th>'
+        return f'<th{style_attr}>{h}</th>'
 
-    headers_html = "".join([_header_cell_html(h) for h in headers])
+    # طلب صريح خاص بالنموذج التاسع (توزيع مواد غذائية): تصغير خط عنوان
+    # "مستحق" وعناوين حقول المواد الست ليتناسب كل نص مع عرض حقله الجديد
+    # الأضيق (أو الأوسع، بحسب توزيع العرض أدناه)، دون أن يمسّ هذا خط أي
+    # قالب آخر يستخدم نفس أسماء الأعمدة.
+    V9_HEADER_FONT_OVERRIDES = {
+        "مستحق": "font-size: 10pt;",
+        "طحين": "font-size: 11pt;", "سكر": "font-size: 11pt;", "زيت": "font-size: 11pt;",
+        "رز": "font-size: 11pt;", "معجون": "font-size: 11pt;", "باقوليات": "font-size: 11pt;",
+        "التاريخ": "font-size: 9pt;",
+    }
+    if template_choice == "النموذج التاسع (توزيع مواد غذائية، بدون رقم بطاقة)":
+        headers_html = "".join([_header_cell_html(h, V9_HEADER_FONT_OVERRIDES.get(h, "")) for h in headers])
+    else:
+        headers_html = "".join([_header_cell_html(h) for h in headers])
 
     # أعمدة "حرجة" محتواها كلمة واحدة غير قابلة للف (رقم، اسم عمود، رقم بطاقة)
     # تحصل على نسبة ثابتة مضمونة بصرف النظر عن عدد بقية الأعمدة، وإلا خاطرنا
@@ -2069,6 +2083,34 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
                     take = deficit * (1 / 3) / len(blank_indices)
                     for i in blank_indices:
                         resolved_widths[i] -= take
+
+        # طلب صريح خاص بالنموذج التاسع (توزيع مواد غذائية): تقليص حقل اسم رب
+        # الأسرة 15%، وحقل "مستحق" 20%، وحقل "التاريخ" 40% — وتحويل كل
+        # المساحة المحرَّرة من الثلاثة لحقول المواد الست (طحين/سكر/زيت/رز/
+        # معجون/باقوليات) موزَّعة عليها بالتساوي فيما بينها.
+        if template_choice == "النموذج التاسع (توزيع مواد غذائية، بدون رقم بطاقة)":
+            material_indices = [i for i, h in enumerate(headers)
+                                 if h in ("طحين", "سكر", "زيت", "رز", "معجون", "باقوليات")]
+            date_idx = next((i for i, h in enumerate(headers) if h == "التاريخ"), None)
+            mostahiq_idx = next((i for i, h in enumerate(headers) if h == "مستحق"), None)
+            freed_v9 = 0.0
+            if name_idx is not None:
+                cut = resolved_widths[name_idx] * 0.15
+                resolved_widths[name_idx] -= cut
+                freed_v9 += cut
+            if mostahiq_idx is not None:
+                cut = resolved_widths[mostahiq_idx] * 0.20
+                resolved_widths[mostahiq_idx] -= cut
+                freed_v9 += cut
+            if date_idx is not None:
+                cut = resolved_widths[date_idx] * 0.40
+                resolved_widths[date_idx] -= cut
+                freed_v9 += cut
+            if material_indices:
+                material_total = sum(resolved_widths[i] for i in material_indices) + freed_v9
+                equal_share = material_total / len(material_indices)
+                for i in material_indices:
+                    resolved_widths[i] = equal_share
         colgroup_html = "<colgroup>" + "".join(f'<col style="width:{w:.2f}%">' for w in resolved_widths) + "</colgroup>"
     font_face_css = get_pdf_font_face_css()
     pdf_font_stack = "'Tajawal', 'Segoe UI Semibold', 'Segoe UI', 'Calibri', 'Tahoma', 'Arial', sans-serif"
