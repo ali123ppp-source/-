@@ -2111,6 +2111,17 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
                 equal_share = material_total / len(material_indices)
                 for i in material_indices:
                     resolved_widths[i] = equal_share
+
+            # طلب متابعة: الاسم لا يزال متلاصقاً مع حقل "مستحق" المجاور —
+            # تقليص كل حقل من حقول المواد الست 10% إضافية (من عرضها بعد
+            # التوزيع أعلاه)، وإضافة كامل هذا المحرَّر لحقل الاسم فقط.
+            if material_indices and name_idx is not None:
+                freed_materials = 0.0
+                for i in material_indices:
+                    cut = resolved_widths[i] * 0.10
+                    resolved_widths[i] -= cut
+                    freed_materials += cut
+                resolved_widths[name_idx] += freed_materials
         colgroup_html = "<colgroup>" + "".join(f'<col style="width:{w:.2f}%">' for w in resolved_widths) + "</colgroup>"
     font_face_css = get_pdf_font_face_css()
     pdf_font_stack = "'Tajawal', 'Segoe UI Semibold', 'Segoe UI', 'Calibri', 'Tahoma', 'Arial', sans-serif"
