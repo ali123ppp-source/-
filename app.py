@@ -2143,21 +2143,7 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
                 padding: 14mm 16mm;
                 box-sizing: border-box;
             }}
-            .cover-header-table {{
-                width: 100%;
-                border-collapse: collapse;
-            }}
-            .cover-header-table td {{
-                border: none;
-                padding: 0;
-                vertical-align: top;
-                white-space: normal;
-            }}
-            .cover-header-spacer, .cover-header-logo-cell {{
-                width: 32mm;
-                text-align: center;
-            }}
-            .cover-header-center {{
+            .cover-header {{
                 text-align: center;
             }}
             .cover-ministry-name {{
@@ -2165,10 +2151,11 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
                 font-weight: 800;
                 color: #1B3A63;
                 letter-spacing: 0.5px;
+                margin-top: 5mm;
             }}
             .cover-logo, .cover-logo-placeholder {{
-                width: 28mm;
-                height: 28mm;
+                width: 46mm;
+                height: 46mm;
                 display: inline-block;
             }}
             .cover-logo-placeholder {{
@@ -2178,7 +2165,7 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
                 align-items: center;
                 justify-content: center;
                 text-align: center;
-                font-size: 9pt;
+                font-size: 10pt;
                 font-weight: bold;
                 color: #9AA7B8;
                 line-height: 1.4;
@@ -2302,15 +2289,10 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
     </head>
     <body>
         <div class="cover-page">
-            <table class="cover-header-table">
-                <tr>
-                    <td class="cover-header-logo-cell">{cover_logo_html}</td>
-                    <td class="cover-header-center">
-                        <div class="cover-ministry-name">وزارة التجارة العراقية</div>
-                    </td>
-                    <td class="cover-header-spacer"></td>
-                </tr>
-            </table>
+            <div class="cover-header">
+                {cover_logo_html}
+                <div class="cover-ministry-name">وزارة التجارة العراقية</div>
+            </div>
             <div class="cover-gold-rule"></div>
             <div class="cover-title-wrap">
                 <div class="cover-title-badge">{cover_title}</div>
