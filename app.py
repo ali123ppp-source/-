@@ -492,6 +492,24 @@ def _extract_agent_metadata(rows_data):
                 break
     return metadata
 
+# ملفات Word حقيقية مرّت سابقاً بتتبع التغييرات (Track Changes) قد تترك مسافة
+# فاصلة بين كلمتين "معلَّمة كإضافة" داخل عنصر <w:ins> متداخل — وخاصية
+# python-docx القياسية (cell.text / paragraph.text) تقرأ فقط عناصر <w:r>
+# المباشرة تحت الفقرة فلا تراها، فتلتصق الكلمتان ببعض بلا مسافة في الاسم
+# المستخرج. هذه الدالة تمشي على كل عناصر <w:t> الفعلية داخل الخلية/الفقرة
+# مهما كان تداخلها (تشمل w:ins والروابط وعناصر التحكم)، وتتجاهل عمداً
+# w:delText (نص محذوف بتتبع التغييرات، غير مرئي أصلاً بالمستند)، فتضمن عدم
+# ضياع أي مسافة أو كلمة حقيقية موجودة بالملف بغض النظر عن مكان تداخلها.
+def _extract_full_oxml_text(oxml_element):
+    parts = []
+    for el in oxml_element.iter():
+        tag = el.tag
+        if tag == qn('w:t'):
+            parts.append(el.text or '')
+        elif tag in (qn('w:tab'), qn('w:br'), qn('w:cr'), qn('w:p')):
+            parts.append(' ')
+    return ''.join(parts).strip()
+
 # -----------------------------------------------------------------------------
 # محرك قراءة وتنظيف البيانات المطور
 # -----------------------------------------------------------------------------
@@ -507,7 +525,7 @@ def extract_and_clean_data(file_obj, card_choice, name_length_choice, sort_alpha
     if file_ext == 'docx':
         doc = Document(file_obj)
         for para in doc.paragraphs:
-            text = para.text.strip()
+            text = _extract_full_oxml_text(para._p)
             if not text:
                 continue
             label, sep, value = text.partition(":")
@@ -515,7 +533,7 @@ def extract_and_clean_data(file_obj, card_choice, name_length_choice, sort_alpha
                 metadata_rows.append([label.strip(), value.strip()])
         for table in doc.tables:
             for row in table.rows:
-                cells = [cell.text.strip().replace('\n', ' ') for cell in row.cells]
+                cells = [_extract_full_oxml_text(cell._tc) for cell in row.cells]
                 rows_data.append(cells)
                 metadata_rows.append(cells)
 

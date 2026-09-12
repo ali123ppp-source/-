@@ -514,6 +514,90 @@ def test_material_distribution_template_without_card_or_total_columns():
           not any("رقم البطاقة" in w for w in warnings), detail=str(warnings))
 
 
+# ---------------------------------------------------------------------------
+# 14) اسم داخل خلية docx حقيقية مرّت بتتبع التغييرات (Track Changes) قد تكون
+#     المسافة الفاصلة بين كلمتين معلَّمة كـ"إضافة" داخل عنصر <w:ins> متداخل —
+#     cell.text القياسية بـ python-docx تقرأ فقط عناصر <w:r> المباشرة تحت
+#     الفقرة فتُسقط تلك المسافة بصمت، فتلتصق الكلمتان ببعض بلا فاصل. تحقّق
+#     أن استخراجنا (الذي يمشي على كل w:t الفعلية بغض النظر عن تداخلها) لا
+#     يفقد هذه المسافة.
+# ---------------------------------------------------------------------------
+def _build_cell_with_ins_wrapped_space(first_text, second_text):
+    """يبني خلية جدول Word مؤقتة نصها مقسّم بين حقلين تفصل بينهما مسافة
+    واحدة معلَّمة كإضافة بتتبع التغييرات (<w:ins> متداخل) — بالضبط الشكل
+    الذي يُسقطه cell.text القياسية بصمت."""
+    from docx import Document
+    from docx.oxml.ns import qn
+    from lxml import etree
+
+    doc = Document()
+    table = doc.add_table(rows=1, cols=1)
+    cell = table.rows[0].cells[0]
+    p = cell.paragraphs[0]
+    p.add_run(first_text)
+    ins = etree.SubElement(p._p, qn('w:ins'))
+    ins.set(qn('w:id'), '1')
+    ins.set(qn('w:author'), 'test')
+    r = etree.SubElement(ins, qn('w:r'))
+    t = etree.SubElement(r, qn('w:t'))
+    t.text = ' '
+    t.set(qn('xml:space'), 'preserve')
+    p.add_run(second_text)
+    return cell
+
+
+def test_ins_wrapped_space_not_dropped_by_standard_cell_text():
+    cell = _build_cell_with_ins_wrapped_space("علي السجاد حسين عبد علي", "الفرطوسي")
+    check("sanity: python-docx's own cell.text silently drops the <w:ins>-wrapped space (confirms the bug exists upstream)",
+          cell.text == "علي السجاد حسين عبد عليالفرطوسي", detail=repr(cell.text))
+    check("fix: _extract_full_oxml_text keeps the space intact",
+          app._extract_full_oxml_text(cell._tc) == "علي السجاد حسين عبد علي الفرطوسي",
+          detail=repr(app._extract_full_oxml_text(cell._tc)))
+
+
+def test_name_with_tracked_change_space_not_merged_end_to_end():
+    import io
+    from docx import Document
+
+    doc = Document()
+    table = doc.add_table(rows=1, cols=6)
+    headers = ["ت", "اسم رب الأسرة", "رقم البطاقة", "الكلي", "مستحق", "محجوب"]
+    for i, text in enumerate(headers):
+        table.rows[0].cells[i].text = text
+
+    data_row = table.add_row().cells
+    data_row[0].text = "1"
+    # المسافة الفاصلة بين الكلمة الأولى والثانية بالاسم واقعة داخل w:ins،
+    # وضمن نطاق أول 4 كلمات (الاسم الرباعي) حتى يكشف الاختبار الالتصاق فعلاً.
+    name_cell = data_row[1]
+    p = name_cell.paragraphs[0]
+    p.add_run("علي")
+    from docx.oxml.ns import qn
+    from lxml import etree
+    ins = etree.SubElement(p._p, qn('w:ins'))
+    ins.set(qn('w:id'), '1')
+    ins.set(qn('w:author'), 'test')
+    r = etree.SubElement(ins, qn('w:r'))
+    t = etree.SubElement(r, qn('w:t'))
+    t.text = ' '
+    t.set(qn('xml:space'), 'preserve')
+    p.add_run("الفرطوسي حسين عبد الجنابي")
+    data_row[2].text = "1234567"
+    data_row[3].text = "4"
+    data_row[4].text = "4"
+    data_row[5].text = "0"
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    buf.name = "test.docx"
+
+    df, warnings, metadata = app.extract_and_clean_data(buf, "رقم البطاقة القديم", "الاسم الرباعي (إن وجد)", True)
+    extracted_name = df.iloc[0]["اسم رب الأسرة"] if len(df) else None
+    check("tracked_change_space: name extracted with the space intact, not merged",
+          extracted_name == "علي الفرطوسي حسين عبد", detail=repr(extracted_name))
+
+
 def main():
     tests = [
         test_real_world_layout_with_blank_column,
@@ -541,6 +625,8 @@ def main():
         test_material_distribution_template_without_card_or_total_columns,
         test_agent_metadata_extracted_from_docx_paragraphs,
         test_agent_metadata_from_table_cells_like_real_xlsx,
+        test_ins_wrapped_space_not_dropped_by_standard_cell_text,
+        test_name_with_tracked_change_space_not_merged_end_to_end,
     ]
     for t in tests:
         try:
