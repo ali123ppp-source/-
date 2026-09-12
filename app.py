@@ -1986,6 +1986,36 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
                 freed_blank += resolved_widths[i] - new_width
                 resolved_widths[i] = new_width
             resolved_widths[notes_idx] += freed_blank
+
+        # طلب صريح: تقليص "ملاحظات" 60% من عرضها الحالي، وتوزيع بالضبط: 40%
+        # (من عرضها الحالي قبل التقليص) لعمود الاسم، و20% لعمود "حقل فارغ" —
+        # 40+20=60 يطابق كامل المساحة المحرَّرة، وبقية الأعمدة تبقى بلا تغيير.
+        name_idx = next((i for i, h in enumerate(headers) if "اسم" in h), None)
+        if notes_idx is not None:
+            original_notes = resolved_widths[notes_idx]
+            cut_to_name = original_notes * 0.40 if name_idx is not None else 0.0
+            cut_to_blank = original_notes * 0.20 if blank_indices else 0.0
+            resolved_widths[notes_idx] = original_notes - cut_to_name - cut_to_blank
+            if name_idx is not None:
+                resolved_widths[name_idx] += cut_to_name
+            if blank_indices:
+                share = cut_to_blank / len(blank_indices)
+                for i in blank_indices:
+                    resolved_widths[i] += share
+
+            # حد أدنى: "ملاحظات" نص عنوانها وحده (7 أحرف) يحتاج مساحة معينة
+            # ليبقى داخل حدود الجدول ولا يتداخل مع العمود المجاور — إن أنزل
+            # التوزيع أعلاه عرضها دون هذا الحد، تُسحب الفارق بنفس نسبة
+            # 40:20 من عمودي الاسم والحقل الفارغ اللذين استفادا منه أصلاً.
+            deficit = 13.5 - resolved_widths[notes_idx]
+            if deficit > 0:
+                resolved_widths[notes_idx] = 13.5
+                if name_idx is not None:
+                    resolved_widths[name_idx] -= deficit * (2 / 3)
+                if blank_indices:
+                    take = deficit * (1 / 3) / len(blank_indices)
+                    for i in blank_indices:
+                        resolved_widths[i] -= take
         colgroup_html = "<colgroup>" + "".join(f'<col style="width:{w:.2f}%">' for w in resolved_widths) + "</colgroup>"
     font_face_css = get_pdf_font_face_css()
     pdf_font_stack = "'Tajawal', 'Segoe UI Semibold', 'Segoe UI', 'Calibri', 'Tahoma', 'Arial', sans-serif"
