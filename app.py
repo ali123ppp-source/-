@@ -4,6 +4,7 @@ from io import BytesIO
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ALIGN_VERTICAL
+from docx.enum.style import WD_STYLE_TYPE
 from docx.shared import Cm, Pt, RGBColor, Inches
 from docx.oxml import parse_xml, OxmlElement
 from docx.oxml.ns import nsdecls, qn
@@ -121,45 +122,58 @@ def set_cell_no_wrap(cell):
     no_wrap = parse_xml(f'<w:noWrap {nsdecls("w")}/>')
     tcPr.append(no_wrap)
 
+def _get_or_create_char_style(doc, font_name, size_pt, bold, color_rgb):
+    """يبني نمط حرف (character style) مرة واحدة لكل توليفة (خط/حجم/غامق/لون) ويُعاد استخدامه
+    بالإشارة إليه (w:rStyle) بدل تكرار خصائص التنسيق الكاملة (rFonts/sz/b/color) داخل كل
+    خلية على حدة. هذا التكرار وحده كان يُضخّم حجم XML الداخلي للمستند بشدة في الملفات
+    الكبيرة (مثلاً 2.6 ميجابايت لـ1089 صف فقط) ويُثقل أداء Word عند الفتح والتمرير والتعديل،
+    رغم أن حجم الملف على القرص يبدو صغيراً بسبب الضغط."""
+    color_key = str(color_rgb) if color_rgb else "none"
+    safe_font = re.sub(r'[^A-Za-z0-9]', '', font_name) or "Font"
+    style_name = f"CellFmt_{safe_font}_{size_pt}_{int(bool(bold))}_{color_key}"
+    try:
+        return doc.styles[style_name]
+    except KeyError:
+        pass
+    style = doc.styles.add_style(style_name, WD_STYLE_TYPE.CHARACTER)
+    style.font.name = font_name
+    style.font.size = Pt(size_pt)
+    style.font.bold = bold
+    if color_rgb:
+        style.font.color.rgb = color_rgb
+    rPr = style.element.get_or_add_rPr()
+    rFonts = rPr.find(qn('w:rFonts'))
+    if rFonts is None:
+        rFonts = OxmlElement('w:rFonts')
+        rPr.insert(0, rFonts)
+    rFonts.set(qn('w:ascii'), font_name)
+    rFonts.set(qn('w:hAnsi'), font_name)
+    rFonts.set(qn('w:cs'), font_name)
+    return style
+
 def format_cell_advanced(cell, text, bold=False, color_rgb=None, size_pt=16, font_name="Calibri", align="center"):
     cell.text = str(text)
     p = cell.paragraphs[0]
-    
+
     if align == "right":
         p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     elif align == "left":
         p.alignment = WD_ALIGN_PARAGRAPH.LEFT
     else:
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        
+
     pPr = p.paragraph_format.element.get_or_add_pPr()
     pPr.append(parse_xml(f'<w:bidi {nsdecls("w")}/>'))
-    
+
+    style = _get_or_create_char_style(cell.part.document, font_name, size_pt, bold, color_rgb)
     for run in p.runs:
-        run.bold = bold
-        if color_rgb:
-            run.font.color.rgb = color_rgb
-            
-        rPr = run._r.get_or_add_rPr()
-        rFonts = OxmlElement('w:rFonts')
-        rFonts.set(qn('w:ascii'), font_name)
-        rFonts.set(qn('w:hAnsi'), font_name)
-        rFonts.set(qn('w:cs'), font_name)
-        rPr.append(rFonts)
-        run.font.size = Pt(size_pt)
+        run.style = style
 
 def _add_styled_run(p, text, bold, color_rgb, font_name, size_pt):
+    doc = p.part.document
+    style = _get_or_create_char_style(doc, font_name, size_pt, bold, color_rgb)
     run = p.add_run(text)
-    run.bold = bold
-    if color_rgb:
-        run.font.color.rgb = color_rgb
-    rPr = run._r.get_or_add_rPr()
-    rFonts = OxmlElement('w:rFonts')
-    rFonts.set(qn('w:ascii'), font_name)
-    rFonts.set(qn('w:hAnsi'), font_name)
-    rFonts.set(qn('w:cs'), font_name)
-    rPr.append(rFonts)
-    run.font.size = Pt(size_pt)
+    run.style = style
     return run
 
 def format_name_cell_with_small_suffix(cell, text, base_size=16, small_size=10, font_name="Calibri", bold=False, color_rgb=None, align="left"):
@@ -1760,7 +1774,7 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
                 vals = [
                     (row["ت"], ter_bg),
                     *card_vals,
-                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 18.4pt; white-space: normal;"),
                     ("x" if is_eligible_zero else "", ""),
                     (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
                     (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
@@ -1770,7 +1784,7 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
             else:
                 vals = [
                     (row["ت"], ter_bg),
-                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 18.4pt; white-space: normal;"),
                     ("x" if is_eligible_zero else "", ""),
                     (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
                     (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
@@ -1783,7 +1797,7 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
                 vals = [
                     (row["ت"], ter_bg),
                     *card_vals,
-                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 18.4pt; white-space: normal;"),
                     ("x" if is_eligible_zero else "", ""),
                     ("x" if is_eligible_zero else "", ""),
                     (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
@@ -1794,7 +1808,7 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
             else:
                 vals = [
                     (row["ت"], ter_bg),
-                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 18.4pt; white-space: normal;"),
                     ("x" if is_eligible_zero else "", ""),
                     ("x" if is_eligible_zero else "", ""),
                     (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
@@ -1808,7 +1822,7 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
                 vals = [
                     (row["ت"], ter_bg),
                     *card_vals,
-                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 18.4pt; white-space: normal;"),
                     (row["الكلي"], "background-color: #E5E7E9;" if not is_eligible_zero else ""),
                     (row["مستحق"], ""),
                     (row["محجوب"], "background-color: #FCF3CF;" if not is_eligible_zero else ""),
@@ -1817,7 +1831,7 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
             else:
                 vals = [
                     (row["ت"], ter_bg),
-                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 18.4pt; white-space: normal;"),
                     *card_vals,
                     (row["الكلي"], "background-color: #E5E7E9;" if not is_eligible_zero else ""),
                     (row["مستحق"], ""),
@@ -1828,21 +1842,21 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
             vals = [
                 (row["ت"], ter_bg),
                 *card_vals,
-                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 18.4pt; white-space: normal;"),
                 (row["الكلي"], "background-color: #E8F8F5;" if not is_eligible_zero else "")
             ] + [("", "")] * 12
         elif template_choice == "النموذج السادس (12 سلة، العدد المستحق)":
             vals = [
                 (row["ت"], ter_bg),
                 *card_vals,
-                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 18.4pt; white-space: normal;"),
                 (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else "")
             ] + [("", "")] * 12
         elif template_choice == "النموذج الثامن (8 سلات، العدد المستحق)":
             vals = [
                 (row["ت"], ter_bg),
                 *card_vals,
-                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 18.4pt; white-space: normal;"),
                 (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else "")
             ] + [("", "")] * 8
         elif template_choice == "النموذج السابع (تفصيل المواد الغذائية)":
@@ -1850,7 +1864,7 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
                 vals = [
                     (row["ت"], ter_bg),
                     *card_vals,
-                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 18.4pt; white-space: normal;"),
                     (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
                     (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
                     (row["محجوب"], "background-color: #FADBD8;" if not is_eligible_zero else ""),
@@ -1859,7 +1873,7 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
             else:
                 vals = [
                     (row["ت"], ter_bg),
-                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 18.4pt; white-space: normal;"),
                     *card_vals,
                     (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
                     (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
@@ -1869,13 +1883,13 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
         elif template_choice == "النموذج التاسع (توزيع مواد غذائية، بدون رقم بطاقة)":
             vals = [
                 (row["ت"], ter_bg),
-                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold;"),
+                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 18.4pt; white-space: normal;"),
                 (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else "")
             ] + [("", "")] * 7
         else:
             vals = [
                 (row["ت"], ter_bg),
-                (row["اسم رب الأسرة"], f"text-align: right; font-weight: bold; color: {'#FF0000' if is_eligible_zero else '#0070C0'};"),
+                (row["اسم رب الأسرة"], f"text-align: right; font-weight: bold; font-size: 18.4pt; white-space: normal; color: {'#FF0000' if is_eligible_zero else '#0070C0'};"),
                 ("x" if is_eligible_zero else row["مستحق"], ""),
                 ("XXXXXXXXXXXX" if is_eligible_zero else "", ""),
                 ("XXXXXXXXXXXX" if is_eligible_zero else "", "")
@@ -1887,16 +1901,72 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
 
         rows_html += f'<tr>{cells_html}</tr>'
 
+    # "كلي/مستحق/محجوب" الثلاثة معاً (النماذج 1، 2، 3، 7) فقط تُعرض بعرض معقول
+    # يتناسب مع نصها القصير (بدل ترك العرض التلقائي يوسّعها بلا داع)، مع تضييق
+    # عمودي الاسم والملاحظات معها — نص أفقي عادي مألوف، بلا أي دوران؛ محاولة
+    # سابقة بتدوير النص 90 درجة أنتجت خطوطاً عربية متكسّرة غير مقروءة فاستُبعدت.
+    # لا يُطبَّق أي من هذا على قوالب أخرى (السلال، النموذج التاسع...) تجنباً
+    # لأي تغيير غير مطلوب في تصاميمها.
+    COMPACT_HEADERS = {"الكلي", "مستحق", "المستحق", "محجوب", "المحجوب"}
+    use_compact_columns = any(h in COMPACT_HEADERS for h in headers)
+
     def _header_cell_html(h):
+        pill_extra = " pill-tight" if use_compact_columns else ""
         if "كلي" in h:
-            return f'<th><span class="pill pill-blue">{h}</span></th>'
+            return f'<th><span class="pill{pill_extra} pill-blue">{h}</span></th>'
         if "مستحق" in h:
-            return f'<th><span class="pill pill-green">{h}</span></th>'
+            return f'<th><span class="pill{pill_extra} pill-green">{h}</span></th>'
         if "محجوب" in h:
-            return f'<th><span class="pill pill-red">{h}</span></th>'
+            return f'<th><span class="pill{pill_extra} pill-red">{h}</span></th>'
         return f'<th>{h}</th>'
 
     headers_html = "".join([_header_cell_html(h) for h in headers])
+
+    # أعمدة "حرجة" محتواها كلمة واحدة غير قابلة للف (رقم، اسم عمود، رقم بطاقة)
+    # تحصل على نسبة ثابتة مضمونة بصرف النظر عن عدد بقية الأعمدة، وإلا خاطرنا
+    # بأن يزاحمها ازدحام الأعمدة (كوضع "القديم والحديث" مع 4 أشهر أو 7 مواد
+    # معاً) فتفيض بلا مكان تلف إليه. الأعمدة "المرنة" الباقية (حقول فارغة،
+    # أشهر، مواد غذائية) عادة عناوينها قابلة للف على سطرين ولا بيانات حقيقية
+    # فيها، فتتقاسم ما تبقى من المساحة بحسب طول عنوانها.
+    def _critical_pct(h):
+        if h in COMPACT_HEADERS:
+            return max(len(h) * 1.3, 11.5)
+        if h == "ت":
+            return 3.0
+        if "اسم" in h:
+            return 20.0
+        if h == "ملاحظات":
+            return 6.0
+        if "بطاق" in h or "تموين" in h or h in ("القديم", "الحديث"):
+            return 8.5
+        return None
+
+    table_class = ""
+    colgroup_html = ""
+    if use_compact_columns:
+        table_class = "compact"
+        critical = [_critical_pct(h) for h in headers]
+        critical_total = sum(p for p in critical if p is not None)
+        remaining_pct = max(100.0 - critical_total, 15.0)
+        flex_weights = [min(max(len(h), 3), 7) * 0.55 if p is None else 0 for h, p in zip(headers, critical)]
+        total_flex_weight = sum(flex_weights) or 1
+        resolved_widths = [
+            p if p is not None else remaining_pct * w / total_flex_weight
+            for p, w in zip(critical, flex_weights)
+        ]
+
+        # طلب صريح: تقليص عرض كل الأعمدة الأخرى 5% وتحويل المساحة المُحرَّرة
+        # لعمود "ملاحظات" تحديداً حتى يظهر بوضوح (كان أضيق عمود سابقاً).
+        notes_idx = next((i for i, h in enumerate(headers) if h == "ملاحظات"), None)
+        if notes_idx is not None:
+            freed = 0.0
+            for i in range(len(resolved_widths)):
+                if i != notes_idx:
+                    cut = resolved_widths[i] * 0.05
+                    resolved_widths[i] -= cut
+                    freed += cut
+            resolved_widths[notes_idx] += freed
+        colgroup_html = "<colgroup>" + "".join(f'<col style="width:{w:.2f}%">' for w in resolved_widths) + "</colgroup>"
     font_face_css = get_pdf_font_face_css()
     pdf_font_stack = "'Tajawal', 'Segoe UI Semibold', 'Segoe UI', 'Calibri', 'Tahoma', 'Arial', sans-serif"
 
@@ -1909,7 +1979,10 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
             {font_face_css}
             @page {{
                 size: {page_size} {page_orientation};
-                margin: 6mm;
+                margin-top: 6mm;
+                margin-bottom: 6mm;
+                margin-left: 0.4mm;
+                margin-right: 1.35mm;
                 @bottom-center {{
                     content: "صفحة " counter(page);
                     font-size: 9pt;
@@ -1923,7 +1996,10 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
                 font-weight: bold;
                 direction: rtl;
                 margin: 0;
-                padding: 10mm 8mm;
+                padding-top: 10mm;
+                padding-bottom: 10mm;
+                padding-left: 0.5mm;
+                padding-right: 1.8mm;
                 background-image: radial-gradient(circle, #DCE4F0 1px, transparent 1px);
                 background-size: 16px 16px;
             }}
@@ -1943,6 +2019,7 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
                 font-size: 19pt;
                 font-weight: 800;
                 letter-spacing: 0.3px;
+                white-space: nowrap;
             }}
             .pill {{
                 display: inline-block;
@@ -1953,6 +2030,12 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
             .pill-blue {{ background-color: #D6E9FA; color: #1F618D; }}
             .pill-green {{ background-color: #D3F3E8; color: #117864; }}
             .pill-red {{ background-color: #FBD9D3; color: #C0392B; }}
+            .pill-tight {{
+                padding: 3px 5px;
+            }}
+            table.compact {{
+                table-layout: fixed;
+            }}
             .invoice-subtitle {{
                 font-size: 9pt;
                 font-weight: normal;
@@ -1962,7 +2045,7 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
             table {{
                 width: 100%;
                 border-collapse: collapse;
-                font-size: 11pt;
+                font-size: 15.81pt;
             }}
             th {{
                 background-color: #EAF0F8;
@@ -1974,7 +2057,7 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
             }}
             td {{
                 border: 1px solid #C3D0E3;
-                padding: 4px 3px;
+                padding: 6.44px 3px;
                 text-align: center;
                 vertical-align: middle;
                 white-space: nowrap;
@@ -2003,7 +2086,8 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
                 <div class="invoice-title">الكشف الإحصائي المنسق للوكيل: {clean_name}</div>
                 <div class="invoice-subtitle">سجل إلكتروني رسمي — نظام تنسيق كشوفات الوكلاء</div>
             </div>
-            <table>
+            <table class="{table_class}">
+                {colgroup_html}
                 <thead>
                     <tr>{headers_html}</tr>
                 </thead>
