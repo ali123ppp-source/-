@@ -1901,7 +1901,17 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
 
         rows_html += f'<tr>{cells_html}</tr>'
 
+    # "كلي/مستحق/محجوب" الثلاثة معاً (النماذج 1، 2، 3، 7) فقط تُعرض بخط عمودي
+    # (دوران 90 درجة) بعرض أدنى ممكن، مع تضييق عمودي الاسم والملاحظات معها —
+    # طلب محدد بهذا الشكل بالضبط، فلا يُطبَّق على قوالب أخرى (السلال، النموذج
+    # التاسع...) تجنباً لأي تغيير غير مطلوب في تصاميمها.
+    ROTATE_HEADERS = {"الكلي", "مستحق", "المستحق", "محجوب", "المحجوب"}
+    use_compact_columns = any(h in ROTATE_HEADERS for h in headers)
+
     def _header_cell_html(h):
+        if h in ROTATE_HEADERS:
+            color_class = "rot-blue" if "كلي" in h else ("rot-green" if "مستحق" in h else "rot-red")
+            return f'<th class="vert-header"><span class="rot {color_class}">{h}</span></th>'
         if "كلي" in h:
             return f'<th><span class="pill pill-blue">{h}</span></th>'
         if "مستحق" in h:
@@ -1911,6 +1921,26 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
         return f'<th>{h}</th>'
 
     headers_html = "".join([_header_cell_html(h) for h in headers])
+
+    def _col_width_pct(h):
+        if h in ROTATE_HEADERS:
+            return 3.5
+        if "اسم" in h:
+            return 20.0
+        if h == "ملاحظات":
+            return 8.0
+        return None
+
+    table_class = ""
+    colgroup_html = ""
+    if use_compact_columns:
+        table_class = "compact"
+        fixed_widths = [_col_width_pct(h) for h in headers]
+        fixed_total = sum(w for w in fixed_widths if w is not None)
+        n_auto = sum(1 for w in fixed_widths if w is None)
+        auto_each = max((100.0 - fixed_total) / n_auto, 4.0) if n_auto else 0
+        resolved_widths = [w if w is not None else auto_each for w in fixed_widths]
+        colgroup_html = "<colgroup>" + "".join(f'<col style="width:{w:.2f}%">' for w in resolved_widths) + "</colgroup>"
     font_face_css = get_pdf_font_face_css()
     pdf_font_stack = "'Tajawal', 'Segoe UI Semibold', 'Segoe UI', 'Calibri', 'Tahoma', 'Arial', sans-serif"
 
@@ -1925,8 +1955,8 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
                 size: {page_size} {page_orientation};
                 margin-top: 6mm;
                 margin-bottom: 6mm;
-                margin-left: 5.4mm;
-                margin-right: 1.5mm;
+                margin-left: 1.5mm;
+                margin-right: 5.4mm;
                 @bottom-center {{
                     content: "صفحة " counter(page);
                     font-size: 9pt;
@@ -1942,8 +1972,8 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
                 margin: 0;
                 padding-top: 10mm;
                 padding-bottom: 10mm;
-                padding-left: 7.2mm;
-                padding-right: 2mm;
+                padding-left: 2mm;
+                padding-right: 7.2mm;
                 background-image: radial-gradient(circle, #DCE4F0 1px, transparent 1px);
                 background-size: 16px 16px;
             }}
@@ -1974,6 +2004,23 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
             .pill-blue {{ background-color: #D6E9FA; color: #1F618D; }}
             .pill-green {{ background-color: #D3F3E8; color: #117864; }}
             .pill-red {{ background-color: #FBD9D3; color: #C0392B; }}
+            table.compact {{
+                table-layout: fixed;
+            }}
+            th.vert-header {{
+                height: 62px;
+                padding: 4px 2px;
+                overflow: visible;
+            }}
+            .rot {{
+                display: inline-block;
+                transform: rotate(-90deg);
+                white-space: nowrap;
+                font-weight: 800;
+            }}
+            .rot-blue {{ color: #1F618D; }}
+            .rot-green {{ color: #117864; }}
+            .rot-red {{ color: #C0392B; }}
             .invoice-subtitle {{
                 font-size: 9pt;
                 font-weight: normal;
@@ -2024,7 +2071,8 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
                 <div class="invoice-title">الكشف الإحصائي المنسق للوكيل: {clean_name}</div>
                 <div class="invoice-subtitle">سجل إلكتروني رسمي — نظام تنسيق كشوفات الوكلاء</div>
             </div>
-            <table>
+            <table class="{table_class}">
+                {colgroup_html}
                 <thead>
                     <tr>{headers_html}</tr>
                 </thead>
