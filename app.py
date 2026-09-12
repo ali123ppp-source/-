@@ -2166,13 +2166,6 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
                 color: #1B3A63;
                 letter-spacing: 0.5px;
             }}
-            .cover-ministry-sub {{
-                font-size: 11pt;
-                font-weight: normal;
-                color: #5D6D7E;
-                margin-top: 3mm;
-                letter-spacing: 0.3px;
-            }}
             .cover-logo, .cover-logo-placeholder {{
                 width: 28mm;
                 height: 28mm;
@@ -2310,7 +2303,6 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
                     <td class="cover-header-logo-cell">{cover_logo_html}</td>
                     <td class="cover-header-center">
                         <div class="cover-ministry-name">وزارة التجارة العراقية</div>
-                        <div class="cover-ministry-sub">سجل إلكتروني رسمي — نظام تنسيق كشوفات الوكلاء</div>
                     </td>
                     <td class="cover-header-spacer"></td>
                 </tr>
