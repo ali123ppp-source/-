@@ -1911,6 +1911,11 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
     # لا يُطبَّق أي من هذا على قوالب أخرى (السلال، النموذج التاسع...) تجنباً
     # لأي تغيير غير مطلوب في تصاميمها.
     COMPACT_HEADERS = {"الكلي", "مستحق", "المستحق", "محجوب", "المحجوب"}
+    # عرض عمود الاسم يجب أن يتسع لأطول اسم فعلي بالملف دون التفاف (النص مقفل
+    # بلا لف)، وإلا انسكب بصرياً على العمود المجاور — عمود مقاس بنص ثابت لا
+    # يتحمل نصاً متغير الطول أقصر مما يحتاجه أطول اسم حقيقي بالبيانات.
+    name_col_key = "اسم رب الأسرة" if "اسم رب الأسرة" in df.columns else ("اسم المواطن" if "اسم المواطن" in df.columns else None)
+    max_name_len = df[name_col_key].astype(str).str.len().max() if name_col_key and not df.empty else 15
     use_compact_columns = any(h in COMPACT_HEADERS for h in headers)
 
     def _header_cell_html(h):
@@ -1937,7 +1942,7 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
         if h == "ت":
             return 6.0
         if "اسم" in h:
-            return 20.0
+            return min(max(15.0, max_name_len * 1.5), 25.0)
         if h == "ملاحظات":
             return 6.0
         if "بطاق" in h or "تموين" in h or h in ("القديم", "الحديث"):
@@ -1971,16 +1976,16 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
             resolved_widths[notes_idx] += freed
 
         # طلب صريح: تصغير عمود "حقل فارغ" (الحقل بلا بيانات حقيقية) بمقدار
-        # 50% من عرضه الطبيعي، وتحويل المساحة المُحرَّرة لعمود الاسم.
+        # 50% من عرضه الطبيعي ثم 30% إضافية فوقها (أي يبقى 35% من الأصل)،
+        # وتحويل كل المساحة المُحرَّرة لعمود "ملاحظات" حتى يظهر كاملاً بالورقة.
         blank_indices = [i for i, h in enumerate(headers) if h.startswith("حقل فارغ")]
-        name_idx = next((i for i, h in enumerate(headers) if "اسم" in h), None)
-        if blank_indices and name_idx is not None:
+        if blank_indices and notes_idx is not None:
             freed_blank = 0.0
             for i in blank_indices:
-                cut = resolved_widths[i] * 0.5
-                resolved_widths[i] -= cut
-                freed_blank += cut
-            resolved_widths[name_idx] += freed_blank
+                new_width = max(resolved_widths[i] * 0.35, 4.0)
+                freed_blank += resolved_widths[i] - new_width
+                resolved_widths[i] = new_width
+            resolved_widths[notes_idx] += freed_blank
         colgroup_html = "<colgroup>" + "".join(f'<col style="width:{w:.2f}%">' for w in resolved_widths) + "</colgroup>"
     font_face_css = get_pdf_font_face_css()
     pdf_font_stack = "'Tajawal', 'Segoe UI Semibold', 'Segoe UI', 'Calibri', 'Tahoma', 'Arial', sans-serif"
