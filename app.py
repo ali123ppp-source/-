@@ -2147,7 +2147,7 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
     # صفحة واجهة رسمية أول كل ملف (تحل محل البنر السابق أعلى الجدول): اسم
     # الوزارة، شعارها، عنوان يعكس طريقة الترتيب، وبيانات الوكيل المستخرجة من
     # الملف الأصلي إن وُجدت (فراغ أنيق بدل الحقل إن لم تتوفر بدل إظهار خطأ).
-    cover_title = "سجل حسب الترتيب الأبجدي" if sort_alphabetically else "سجل توزيع"
+    cover_title = "سجل حسب الترتيب" if sort_alphabetically else "سجل توزيع"
     cover_agency_name = agent_metadata.get("اسم_الوكيل") or clean_name
     cover_agency_number = agent_metadata.get("رقم_الوكالة") or ""
     cover_center = agent_metadata.get("مركز") or ""
