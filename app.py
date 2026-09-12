@@ -633,8 +633,8 @@ def build_professional_word_report(df, filename_base, card_choice, sort_alphabet
     setup_document_layout(doc, filename_base)
 
     clean_name = filename_base
-    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج"]: clean_name = clean_name.replace(w, "")
-    clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', '', clean_name).split())
+    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج", "الترتيب", "الأبجدي", "الابجدي", "أبجدي", "ابجدي"]: clean_name = clean_name.replace(w, " ")
+    clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', ' ', clean_name).split())
 
     title_p = doc.add_paragraph()
     title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
@@ -763,8 +763,8 @@ def build_professional_word_report_v2(df, filename_base, card_choice, sort_alpha
     setup_document_layout(doc, filename_base)
     
     clean_name = filename_base
-    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج"]: clean_name = clean_name.replace(w, "")
-    clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', '', clean_name).split())
+    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج", "الترتيب", "الأبجدي", "الابجدي", "أبجدي", "ابجدي"]: clean_name = clean_name.replace(w, " ")
+    clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', ' ', clean_name).split())
     title_p = doc.add_paragraph()
     title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     title_run = title_p.add_run(f"الكشف الإحصائي المنسق للوكيل: {clean_name}")
@@ -883,8 +883,8 @@ def build_professional_word_report_v3(df, filename_base, card_choice, sort_alpha
     setup_document_layout(doc, filename_base)
     
     clean_name = filename_base
-    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج"]: clean_name = clean_name.replace(w, "")
-    clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', '', clean_name).split())
+    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج", "الترتيب", "الأبجدي", "الابجدي", "أبجدي", "ابجدي"]: clean_name = clean_name.replace(w, " ")
+    clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', ' ', clean_name).split())
     title_p = doc.add_paragraph()
     title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     title_run = title_p.add_run(f"الكشف الإحصائي المنسق للوكيل: {clean_name}")
@@ -998,8 +998,8 @@ def build_professional_word_report_v4(df, filename_base, card_choice, sort_alpha
     setup_document_layout(doc, filename_base)
     
     clean_name = filename_base
-    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج"]: clean_name = clean_name.replace(w, "")
-    clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', '', clean_name).split())
+    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج", "الترتيب", "الأبجدي", "الابجدي", "أبجدي", "ابجدي"]: clean_name = clean_name.replace(w, " ")
+    clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', ' ', clean_name).split())
     title_p = doc.add_paragraph()
     title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     title_run = title_p.add_run(f"الكشف الإحصائي المنسق للوكيل: {clean_name}")
@@ -1114,8 +1114,8 @@ def build_professional_word_report_v5(df, filename_base, card_choice, sort_alpha
     setup_document_layout(doc, filename_base, is_a3=True)
         
     clean_name = filename_base
-    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج"]: clean_name = clean_name.replace(w, "")
-    clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', '', clean_name).split())
+    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج", "الترتيب", "الأبجدي", "الابجدي", "أبجدي", "ابجدي"]: clean_name = clean_name.replace(w, " ")
+    clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', ' ', clean_name).split())
     
     title_p = doc.add_paragraph()
     title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
@@ -1189,8 +1189,8 @@ def build_professional_word_report_v6(df, filename_base, card_choice, sort_alpha
     setup_document_layout(doc, filename_base)
     
     clean_name = filename_base
-    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج"]: clean_name = clean_name.replace(w, "")
-    clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', '', clean_name).split())
+    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج", "الترتيب", "الأبجدي", "الابجدي", "أبجدي", "ابجدي"]: clean_name = clean_name.replace(w, " ")
+    clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', ' ', clean_name).split())
     
     title_p = doc.add_paragraph()
     title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
@@ -1314,8 +1314,8 @@ def build_professional_word_report_v8(df, filename_base, card_choice, sort_alpha
     setup_document_layout(doc, filename_base)
 
     clean_name = filename_base
-    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج"]: clean_name = clean_name.replace(w, "")
-    clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', '', clean_name).split())
+    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج", "الترتيب", "الأبجدي", "الابجدي", "أبجدي", "ابجدي"]: clean_name = clean_name.replace(w, " ")
+    clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', ' ', clean_name).split())
 
     title_p = doc.add_paragraph()
     title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
@@ -1466,8 +1466,8 @@ def build_professional_word_report_v9(df, filename_base, card_choice, sort_alpha
     setup_document_layout(doc, filename_base)
 
     clean_name = filename_base
-    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج"]: clean_name = clean_name.replace(w, "")
-    clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', '', clean_name).split())
+    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج", "الترتيب", "الأبجدي", "الابجدي", "أبجدي", "ابجدي"]: clean_name = clean_name.replace(w, " ")
+    clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', ' ', clean_name).split())
 
     title_p = doc.add_paragraph()
     title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
@@ -1545,8 +1545,8 @@ def build_professional_word_report_v7(df, filename_base, card_choice, sort_alpha
     setup_document_layout(doc, filename_base)
     
     clean_name = filename_base
-    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج"]: clean_name = clean_name.replace(w, "")
-    clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', '', clean_name).split())
+    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج", "الترتيب", "الأبجدي", "الابجدي", "أبجدي", "ابجدي"]: clean_name = clean_name.replace(w, " ")
+    clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', ' ', clean_name).split())
     
     title_p = doc.add_paragraph()
     title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
@@ -1779,8 +1779,8 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
     قابلة للتعديل والطباعة مباشرة من المتصفح."""
     agent_metadata = agent_metadata or {}
     clean_name = filename_base
-    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج"]: clean_name = clean_name.replace(w, "")
-    clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', '', clean_name).split())
+    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج", "الترتيب", "الأبجدي", "الابجدي", "أبجدي", "ابجدي"]: clean_name = clean_name.replace(w, " ")
+    clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', ' ', clean_name).split())
 
     total_all = df["الكلي"].astype(int).sum()
     total_eligible = df["مستحق"].astype(int).sum()
