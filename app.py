@@ -2010,6 +2010,8 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
             return f'<th><span class="pill{pill_extra} pill-green"{style_attr}>{h}</span></th>'
         if "محجوب" in h:
             return f'<th><span class="pill{pill_extra} pill-red"{style_attr}>{h}</span></th>'
+        if "بطاقة" in h and not extra_style:
+            return '<th style="font-size: 10pt;">' + h + '</th>'
         return f'<th{style_attr}>{h}</th>'
 
     # طلب صريح خاص بالنموذج التاسع (توزيع مواد غذائية): تصغير خط عنوان
@@ -2323,7 +2325,7 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
             .pill-red {{ background-color: #FBD9D3; color: #C0392B; }}
             .pill-tight {{
                 padding: 3px 1px;
-                font-size: 12.5pt;
+                font-size: 10pt;
             }}
             table.compact {{
                 table-layout: fixed;
