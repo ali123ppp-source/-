@@ -1621,8 +1621,8 @@ def build_professional_word_report_v10(df, filename_base, card_choice, sort_alph
     return save_doc_buffer(doc, df)
 
 # النموذج الحادي عشر: نفس ترتيب أعمدة النموذج العاشر (ت/الاسم/المستحق/حقل
-# فارغ) لكن بثيم أخضر (رأس جدول أخضر، صفوف خضراء فاتحة متناوبة) وخط Amiri
-# العربي الكلاسيكي بدل Segoe UI Semibold.
+# فارغ) لكن بثيم أخضر (رأس جدول أخضر، صفوف خضراء فاتحة متناوبة) وخط Cairo
+# العربي العصري المستدير بدل Segoe UI Semibold.
 def build_professional_word_report_v11(df, filename_base, card_choice, sort_alphabetically=True):
     doc = Document()
     setup_document_layout(doc, filename_base)
@@ -1634,7 +1634,7 @@ def build_professional_word_report_v11(df, filename_base, card_choice, sort_alph
     title_p = doc.add_paragraph()
     title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     title_run = title_p.add_run(f"الكشف الإحصائي المنسق للوكيل: {clean_name}")
-    title_run.font.name, title_run.font.size, title_run.bold = "Amiri", Pt(14), True
+    title_run.font.name, title_run.font.size, title_run.bold = "Cairo", Pt(14), True
 
     dynamic_name_width = Cm(max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15) * 0.22 + 0.5)
     headers = ["ت", "الاسم", "المستحق", "حقل فارغ"]
@@ -1652,7 +1652,7 @@ def build_professional_word_report_v11(df, filename_base, card_choice, sort_alph
     for i, title in enumerate(headers):
         cell = hdr_cells[i]
         cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
-        format_cell_advanced(cell, title, bold=True, size_pt=14, font_name="Amiri", align="center", color_rgb=COLOR_WHITE)
+        format_cell_advanced(cell, title, bold=True, size_pt=14, font_name="Cairo", align="center", color_rgb=COLOR_WHITE)
         set_cell_background(cell, GREEN_DARK)
 
     prev_letter = None
@@ -1672,23 +1672,23 @@ def build_professional_word_report_v11(df, filename_base, card_choice, sort_alph
 
         cell = row_cells[0]
         cell.width, cell.vertical_alignment = col_widths[0], WD_ALIGN_VERTICAL.CENTER
-        format_cell_advanced(cell, row["ت"], size_pt=14, font_name="Amiri", align="center")
+        format_cell_advanced(cell, row["ت"], size_pt=14, font_name="Cairo", align="center")
         set_cell_background(cell, current_letter_color)
 
         cell = row_cells[1]
         cell.width, cell.vertical_alignment = col_widths[1], WD_ALIGN_VERTICAL.CENTER
         set_cell_no_wrap(cell)
-        format_cell_advanced(cell, row["اسم رب الأسرة"], size_pt=16, font_name="Amiri", align="right")
+        format_cell_advanced(cell, row["اسم رب الأسرة"], size_pt=16, font_name="Cairo", align="right")
         if row_bg: set_cell_background(cell, row_bg)
 
         cell = row_cells[2]
         cell.width, cell.vertical_alignment = col_widths[2], WD_ALIGN_VERTICAL.CENTER
-        format_cell_advanced(cell, row["مستحق"], size_pt=14, font_name="Amiri", align="center")
+        format_cell_advanced(cell, row["مستحق"], size_pt=14, font_name="Cairo", align="center")
         set_cell_background(cell, row_bg or GREEN_LIGHT)
 
         cell = row_cells[3]
         cell.width, cell.vertical_alignment = col_widths[3], WD_ALIGN_VERTICAL.CENTER
-        format_cell_advanced(cell, "", size_pt=14, font_name="Amiri", align="center")
+        format_cell_advanced(cell, "", size_pt=14, font_name="Cairo", align="center")
         if row_bg: set_cell_background(cell, row_bg)
 
     return save_doc_buffer(doc, df)
@@ -1901,26 +1901,33 @@ def get_pdf_font_face_css():
     regular = _get_embedded_font_base64("Tajawal-Regular.ttf")
     bold = _get_embedded_font_base64("Tajawal-Bold.ttf")
     extrabold = _get_embedded_font_base64("Tajawal-ExtraBold.ttf")
-    amiri_regular = _get_embedded_font_base64("Amiri-Regular.ttf")
-    amiri_bold = _get_embedded_font_base64("Amiri-Bold.ttf")
+    cairo_regular = _get_embedded_font_base64("Cairo-Regular.ttf")
+    cairo_bold = _get_embedded_font_base64("Cairo-Bold.ttf")
+    cairo_extrabold = _get_embedded_font_base64("Cairo-ExtraBold.ttf")
     if not (regular and bold and extrabold):
         return ""
-    amiri_css = ""
-    if amiri_regular and amiri_bold:
-        # خط Amiri: خط عربي كلاسيكي (نسخي) أنيق، يُستخدم فقط بالقوالب التي
+    cairo_css = ""
+    if cairo_regular and cairo_bold and cairo_extrabold:
+        # خط Cairo: خط عربي عصري مستدير أنيق، يُستخدم فقط بالقوالب التي
         # تطلب صراحةً خطاً "يميل للخط العربي الجميل" بدل Tajawal الافتراضي.
-        amiri_css = f"""
+        cairo_css = f"""
             @font-face {{
-                font-family: 'Amiri';
+                font-family: 'Cairo';
                 font-weight: 400;
                 font-style: normal;
-                src: url(data:font/ttf;base64,{amiri_regular}) format('truetype');
+                src: url(data:font/ttf;base64,{cairo_regular}) format('truetype');
             }}
             @font-face {{
-                font-family: 'Amiri';
+                font-family: 'Cairo';
                 font-weight: 700;
                 font-style: normal;
-                src: url(data:font/ttf;base64,{amiri_bold}) format('truetype');
+                src: url(data:font/ttf;base64,{cairo_bold}) format('truetype');
+            }}
+            @font-face {{
+                font-family: 'Cairo';
+                font-weight: 800;
+                font-style: normal;
+                src: url(data:font/ttf;base64,{cairo_extrabold}) format('truetype');
             }}
         """
     return f"""
@@ -1942,7 +1949,7 @@ def get_pdf_font_face_css():
                 font-style: normal;
                 src: url(data:font/ttf;base64,{extrabold}) format('truetype');
             }}
-            {amiri_css}
+            {cairo_css}
     """
 
 # -----------------------------------------------------------------------------
@@ -1956,6 +1963,15 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
     clean_name = filename_base
     for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج", "الترتيب", "الأبجدي", "الابجدي", "أبجدي", "ابجدي"]: clean_name = clean_name.replace(w, " ")
     clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', ' ', clean_name).split())
+
+    # طلب صريح: النموذج الحادي عشر (ثيم أخضر) يطابق تصميم الصورة المرجعية
+    # 100% — جدول مسطّح بلا خلفية منقّطة وبلا إطار بطاقة ملّون، بدل الشكل
+    # المشترك المستخدم بباقي القوالب.
+    is_green_theme = template_choice == "النموذج الحادي عشر (ثيم أخضر: ت، الاسم، المستحق، حقل فارغ)"
+    body_bg_image_css = "none" if is_green_theme else "radial-gradient(circle, #DCE4F0 1px, transparent 1px)"
+    body_bg_size_css = "0 0" if is_green_theme else "16px 16px"
+    card_border_css = "1.5px solid #A5D6A7" if is_green_theme else "2.5px solid #1B3A63"
+    card_radius_css = "0px" if is_green_theme else "20px"
 
     total_all = df["الكلي"].astype(int).sum()
     total_eligible = df["مستحق"].astype(int).sum()
@@ -2389,13 +2405,13 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
                 padding-bottom: 10mm;
                 padding-left: 0.5mm;
                 padding-right: 1.8mm;
-                background-image: radial-gradient(circle, #DCE4F0 1px, transparent 1px);
-                background-size: 16px 16px;
+                background-image: {body_bg_image_css};
+                background-size: {body_bg_size_css};
             }}
             .invoice-card {{
                 background-color: #FFFFFF;
-                border: 2.5px solid #1B3A63;
-                border-radius: 20px;
+                border: {card_border_css};
+                border-radius: {card_radius_css};
                 overflow: hidden;
             }}
             @page cover {{
@@ -2559,30 +2575,32 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
                 line-height: 1.6;
             }}
             /* طلب صريح: قالب بديل (ثيم أخضر) بنفس ترتيب أعمدة النموذج
-               العاشر (ت/الاسم/المستحق/حقل فارغ)، برأس وصفوف خضراء متناوبة،
-               ومربع فارغ مستدير الحواف بدل الخلية الفارغة العادية، بخط Amiri
-               (خط عربي كلاسيكي أقرب للخط العربي التقليدي الجميل) — مقصور
-               على هذا القالب فقط عبر صنف table.theme-green. */
+               العاشر (ت/الاسم/المستحق/حقل فارغ) يطابق تصميم الصورة المرجعية
+               100% — رأس وصفوف خضراء متناوبة، جدول مسطّح بلا إطار بطاقة
+               زخرفي، مربع فارغ مستدير الحواف بدل الخلية الفارغة العادية،
+               بخط Cairo (خط عربي عصري مستدير يميل للجمال) — مقصور على هذا
+               القالب فقط عبر صنف table.theme-green. */
             table.theme-green, table.theme-green th, table.theme-green td {{
-                font-family: 'Amiri', 'Tajawal', 'Segoe UI Semibold', serif;
+                font-family: 'Cairo', 'Tajawal', 'Segoe UI Semibold', sans-serif;
             }}
             table.theme-green th {{
-                background-color: #2E7D32;
+                background-color: #43A047;
                 color: #FFFFFF;
-                border-color: #1B5E20;
+                border-color: #FFFFFF;
+                font-size: 14pt;
             }}
             table.theme-green tbody tr:nth-child(even) td {{
                 background-color: #E8F5E9;
             }}
             table.theme-green td {{
-                border-color: #A5D6A7;
+                border-color: #C8E6C9;
             }}
             .green-checkbox {{
                 display: inline-block;
-                width: 18px;
-                height: 18px;
-                border: 2px solid #2E7D32;
-                border-radius: 6px;
+                width: 34px;
+                height: 26px;
+                border: 2px solid #333333;
+                border-radius: 7px;
                 background-color: #FFFFFF;
             }}
         </style>
