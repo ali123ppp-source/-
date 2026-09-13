@@ -89,6 +89,7 @@ if "processing_done" not in st.session_state:
     st.session_state.name_choice = ""
     st.session_state.sort_choice = ""
     st.session_state.merge_choice = ""
+    st.session_state.show_children_filter = False
     st.session_state.extraction_warnings = {}
 
 # -----------------------------------------------------------------------------
@@ -665,12 +666,18 @@ def build_professional_word_report(df, filename_base, card_choice, sort_alphabet
     title_run.font.name, title_run.font.size, title_run.bold = "Segoe UI Semibold", Pt(14), True
     
     is_combined = card_choice == "القديم والحديث"
+    show_children = "اطفال" in df.columns
+    offset = 1 if show_children else 0
     orig_headers = ["ت", "اسم رب الأسرة", "حقل فارغ", "الكلي", "مستحق", "محجوب", card_choice, "ملاحظات"]
+    if show_children:
+        orig_headers.insert(4, "اطفال")
     max_name_len = max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15)
     dynamic_name_width = Cm(max_name_len * 0.22 + 0.5)
     col_widths = [Cm(0.9), dynamic_name_width, Cm(0.44), Cm(0.9), Cm(0.9), Cm(0.9), Cm(1.8), Inches(1.0)]
+    if show_children:
+        col_widths.insert(4, Cm(0.9))
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
-    remaining_indices = [1, 2, 3, 4, 5, 7] if is_combined else None
+    remaining_indices = ([1, 2, 3, 4, 5, 6, 8] if show_children else [1, 2, 3, 4, 5, 7]) if is_combined else None
 
     headers = (["ت", "القديم", "الحديث"] + [orig_headers[i] for i in remaining_indices]) if is_combined else orig_headers
     table = doc.add_table(rows=1, cols=len(headers))
@@ -696,7 +703,7 @@ def build_professional_word_report(df, filename_base, card_choice, sort_alphabet
             cell = hdr_cells[j]
             cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
             title = orig_headers[i]
-            if i in [3, 4, 5]:
+            if i in range(3, 6 + offset):
                 set_cell_vertical_text(cell)
                 format_cell_advanced(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="center", color_rgb=COLOR_NAVY_BLUE)
             else:
@@ -707,10 +714,10 @@ def build_professional_word_report(df, filename_base, card_choice, sort_alphabet
             cell = table.rows[0].cells[i]
             cell.width = col_widths[i]
             cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-            if i in [3, 4, 5]:
+            if i in range(3, 6 + offset):
                 set_cell_vertical_text(cell)
                 format_cell_advanced(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="center", color_rgb=COLOR_NAVY_BLUE)
-            elif i == 6:
+            elif i == 6 + offset:
                 format_header_cell_two_lines(cell, title, bold=True, size_pt=14, font_name="Segoe UI Semibold", color_rgb=COLOR_NAVY_BLUE)
             else:
                 format_cell_advanced(cell, title, bold=True, size_pt=14, font_name="Segoe UI Semibold", align="left" if i==1 else "center", color_rgb=COLOR_NAVY_BLUE)
@@ -730,6 +737,18 @@ def build_professional_word_report(df, filename_base, card_choice, sort_alphabet
         new_row._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
         is_eligible_zero = int(row["مستحق"]) == 0
 
+        def _v1_cell_value(i, row=row, is_eligible_zero=is_eligible_zero, show_children=show_children, offset=offset):
+            if i == 0: return row["ت"]
+            if i == 1: return row["اسم رب الأسرة"]
+            if i == 2: return "x" if is_eligible_zero else ""
+            if i == 3: return row["الكلي"]
+            if show_children and i == 4: return row["اطفال"]
+            if i == 4 + offset: return row["مستحق"]
+            if i == 5 + offset: return row["محجوب"]
+            if i == 6 + offset: return row["رقم البطاقة"]
+            if i == 7 + offset: return "محجوب" if is_eligible_zero else ""
+            return ""
+
         if is_combined:
             cell = row_cells[0]
             cell.width, cell.vertical_alignment = col_widths[0], WD_ALIGN_VERTICAL.CENTER
@@ -747,9 +766,9 @@ def build_professional_word_report(df, filename_base, card_choice, sort_alphabet
                 cell = row_cells[j]
                 cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
                 if i == 1: set_cell_no_wrap(cell)
-                val = row["ت"] if i==0 else row["اسم رب الأسرة"] if i==1 else "x" if i==2 and is_eligible_zero else "" if i==2 else row["الكلي"] if i==3 else row["مستحق"] if i==4 else row["محجوب"] if i==5 else row["رقم البطاقة"] if i==6 else "محجوب" if i==7 and is_eligible_zero else ""
-                font_size = 14 if i==5 else 12 if i==7 and is_eligible_zero else 16
-                text_color = RGBColor(203, 67, 53) if i==7 and is_eligible_zero else None
+                val = _v1_cell_value(i)
+                font_size = 14 if i==5+offset else 12 if i==7+offset and is_eligible_zero else 16
+                text_color = RGBColor(203, 67, 53) if i==7+offset and is_eligible_zero else (RGBColor(230, 126, 34) if show_children and i==4 and int(val) > 0 else None)
                 if i == 1:
                     format_name_cell_with_small_suffix(cell, val, base_size=16, small_size=10, font_name="Calibri", color_rgb=text_color, align="left")
                 else:
@@ -757,18 +776,19 @@ def build_professional_word_report(df, filename_base, card_choice, sort_alphabet
                 if is_eligible_zero: set_cell_background(cell, "EC7063")
                 else:
                     if i==3: set_cell_background(cell, "EBF5FB")
-                    elif i==4: set_cell_background(cell, "E8F8F5")
-                    elif i==5: set_cell_background(cell, "FADBD8")
+                    elif show_children and i==4: set_cell_background(cell, "FDEBD0")
+                    elif i==4+offset: set_cell_background(cell, "E8F8F5")
+                    elif i==5+offset: set_cell_background(cell, "FADBD8")
                 j += 1
         else:
             set_cell_no_wrap(row_cells[1])
-            for i in range(8):
+            for i in range(len(headers)):
                 cell = row_cells[i]
                 cell.width = col_widths[i]
                 cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-                val = row["ت"] if i==0 else row["اسم رب الأسرة"] if i==1 else "x" if i==2 and is_eligible_zero else "" if i==2 else row["الكلي"] if i==3 else row["مستحق"] if i==4 else row["محجوب"] if i==5 else row["رقم البطاقة"] if i==6 else "محجوب" if i==7 and is_eligible_zero else ""
-                font_size = 14 if i==5 else 12 if i==7 and is_eligible_zero else 16
-                text_color = RGBColor(203, 67, 53) if i==7 and is_eligible_zero else None
+                val = _v1_cell_value(i)
+                font_size = 14 if i==5+offset else 12 if i==7+offset and is_eligible_zero else 16
+                text_color = RGBColor(203, 67, 53) if i==7+offset and is_eligible_zero else (RGBColor(230, 126, 34) if show_children and i==4 and int(val) > 0 else None)
                 if i == 1:
                     format_name_cell_with_small_suffix(cell, val, base_size=16, small_size=10, font_name="Calibri", color_rgb=text_color, align="left")
                 else:
@@ -777,8 +797,9 @@ def build_professional_word_report(df, filename_base, card_choice, sort_alphabet
                 else:
                     if i==0: set_cell_background(cell, current_letter_color)
                     elif i==3: set_cell_background(cell, "EBF5FB")
-                    elif i==4: set_cell_background(cell, "E8F8F5")
-                    elif i==5: set_cell_background(cell, "FADBD8")
+                    elif show_children and i==4: set_cell_background(cell, "FDEBD0")
+                    elif i==4+offset: set_cell_background(cell, "E8F8F5")
+                    elif i==5+offset: set_cell_background(cell, "FADBD8")
     return save_doc_buffer(doc, df)
 
 def build_professional_word_report_v2(df, filename_base, card_choice, sort_alphabetically=True):
@@ -793,11 +814,17 @@ def build_professional_word_report_v2(df, filename_base, card_choice, sort_alpha
     title_run = title_p.add_run(f"الكشف الإحصائي المنسق للوكيل: {clean_name}")
     title_run.font.name, title_run.font.size, title_run.bold = "Segoe UI Semibold", Pt(14), True
     is_combined = card_choice == "القديم والحديث"
+    show_children = "اطفال" in df.columns
+    offset = 1 if show_children else 0
     orig_headers = ["ت", "اسم رب الأسرة", "حقل فارغ 1", "حقل فارغ 2", "الكلي", "مستحق", "محجوب", card_choice, "ملاحظات"]
+    if show_children:
+        orig_headers.insert(5, "اطفال")
     dynamic_name_width = Cm(max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15) * 0.22 + 0.5)
     col_widths = [Cm(0.9), dynamic_name_width, Cm(0.80), Cm(0.80), Cm(0.9), Cm(0.9), Cm(0.9), Cm(1.8), Cm(1.80)]
+    if show_children:
+        col_widths.insert(5, Cm(0.9))
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
-    remaining_indices = [1, 2, 3, 4, 5, 6, 8] if is_combined else None
+    remaining_indices = ([1, 2, 3, 4, 5, 6, 7, 9] if show_children else [1, 2, 3, 4, 5, 6, 8]) if is_combined else None
 
     headers = (["ت", "القديم", "الحديث"] + [orig_headers[i] for i in remaining_indices]) if is_combined else orig_headers
     table = doc.add_table(rows=1, cols=len(headers))
@@ -823,7 +850,7 @@ def build_professional_word_report_v2(df, filename_base, card_choice, sort_alpha
             cell = hdr_cells[j]
             cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
             title = orig_headers[i]
-            if i in [4, 5, 6]: set_cell_vertical_text(cell)
+            if i in range(4, 7 + offset): set_cell_vertical_text(cell)
             format_cell_advanced(cell, title, bold=True, size_pt=14, font_name="Segoe UI Semibold", align="left" if i==1 else "center", color_rgb=COLOR_NAVY_BLUE)
             j += 1
     else:
@@ -831,8 +858,8 @@ def build_professional_word_report_v2(df, filename_base, card_choice, sort_alpha
             cell = table.rows[0].cells[i]
             cell.width = col_widths[i]
             cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-            if i in [4, 5, 6]: set_cell_vertical_text(cell)
-            if i == 7:
+            if i in range(4, 7 + offset): set_cell_vertical_text(cell)
+            if i == 7 + offset:
                 format_header_cell_two_lines(cell, title, bold=True, size_pt=14, font_name="Segoe UI Semibold", color_rgb=COLOR_NAVY_BLUE)
             else:
                 format_cell_advanced(cell, title, bold=True, size_pt=14, font_name="Segoe UI Semibold", align="left" if i==1 else "center", color_rgb=COLOR_NAVY_BLUE)
@@ -852,6 +879,18 @@ def build_professional_word_report_v2(df, filename_base, card_choice, sort_alpha
         new_row._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
         is_eligible_zero = int(row["مستحق"]) == 0
 
+        def _v2_cell_value(i, row=row, is_eligible_zero=is_eligible_zero, show_children=show_children, offset=offset):
+            if i == 0: return row["ت"]
+            if i == 1: return row["اسم رب الأسرة"]
+            if i in (2, 3): return "x" if is_eligible_zero else ""
+            if i == 4: return row["الكلي"]
+            if show_children and i == 5: return row["اطفال"]
+            if i == 5 + offset: return row["مستحق"]
+            if i == 6 + offset: return row["محجوب"]
+            if i == 7 + offset: return row["رقم البطاقة"]
+            if i == 8 + offset: return "محجوب" if is_eligible_zero else ""
+            return ""
+
         if is_combined:
             cell = row_cells[0]
             cell.width, cell.vertical_alignment = col_widths[0], WD_ALIGN_VERTICAL.CENTER
@@ -869,8 +908,8 @@ def build_professional_word_report_v2(df, filename_base, card_choice, sort_alpha
                 cell = row_cells[j]
                 cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
                 if i == 1: set_cell_no_wrap(cell)
-                val = row["ت"] if i==0 else row["اسم رب الأسرة"] if i==1 else "x" if i in [2,3] and is_eligible_zero else "" if i in [2,3] else row["الكلي"] if i==4 else row["مستحق"] if i==5 else row["محجوب"] if i==6 else row["رقم البطاقة"] if i==7 else "محجوب" if i==8 and is_eligible_zero else ""
-                text_color = RGBColor(203, 67, 53) if i==8 and is_eligible_zero else None
+                val = _v2_cell_value(i)
+                text_color = RGBColor(203, 67, 53) if i==8+offset and is_eligible_zero else (RGBColor(230, 126, 34) if show_children and i==5 and int(val) > 0 else None)
                 if i == 1:
                     format_name_cell_with_small_suffix(cell, val, base_size=14, small_size=10, font_name="Calibri", color_rgb=text_color, align="left")
                 else:
@@ -878,17 +917,18 @@ def build_professional_word_report_v2(df, filename_base, card_choice, sort_alpha
                 if is_eligible_zero: set_cell_background(cell, "EC7063")
                 else:
                     if i==4: set_cell_background(cell, "EBF5FB")
-                    elif i==5: set_cell_background(cell, "E8F8F5")
-                if i==6: set_cell_background(cell, "E5E7E9")
+                    elif show_children and i==5: set_cell_background(cell, "FDEBD0")
+                    elif i==5+offset: set_cell_background(cell, "E8F8F5")
+                if i==6+offset: set_cell_background(cell, "E5E7E9")
                 j += 1
         else:
             set_cell_no_wrap(row_cells[1])
-            for i in range(9):
+            for i in range(len(headers)):
                 cell = row_cells[i]
                 cell.width = col_widths[i]
                 cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-                val = row["ت"] if i==0 else row["اسم رب الأسرة"] if i==1 else "x" if i in [2,3] and is_eligible_zero else "" if i in [2,3] else row["الكلي"] if i==4 else row["مستحق"] if i==5 else row["محجوب"] if i==6 else row["رقم البطاقة"] if i==7 else "محجوب" if i==8 and is_eligible_zero else ""
-                text_color = RGBColor(203, 67, 53) if i==8 and is_eligible_zero else None
+                val = _v2_cell_value(i)
+                text_color = RGBColor(203, 67, 53) if i==8+offset and is_eligible_zero else (RGBColor(230, 126, 34) if show_children and i==5 and int(val) > 0 else None)
                 if i == 1:
                     format_name_cell_with_small_suffix(cell, val, base_size=14, small_size=10, font_name="Calibri", color_rgb=text_color, align="left")
                 else:
@@ -897,8 +937,9 @@ def build_professional_word_report_v2(df, filename_base, card_choice, sort_alpha
                 else:
                     if i==0: set_cell_background(cell, current_letter_color)
                     elif i==4: set_cell_background(cell, "EBF5FB")
-                    elif i==5: set_cell_background(cell, "E8F8F5")
-                if i==6: set_cell_background(cell, "E5E7E9")
+                    elif show_children and i==5: set_cell_background(cell, "FDEBD0")
+                    elif i==5+offset: set_cell_background(cell, "E8F8F5")
+                if i==6+offset: set_cell_background(cell, "E5E7E9")
     return save_doc_buffer(doc, df)
 
 def build_professional_word_report_v3(df, filename_base, card_choice, sort_alphabetically=True):
@@ -913,11 +954,17 @@ def build_professional_word_report_v3(df, filename_base, card_choice, sort_alpha
     title_run = title_p.add_run(f"الكشف الإحصائي المنسق للوكيل: {clean_name}")
     title_run.font.name, title_run.font.size, title_run.bold = "Segoe UI Semibold", Pt(14), True
     is_combined = card_choice == "القديم والحديث"
+    show_children = "اطفال" in df.columns
+    offset = 1 if show_children else 0
     orig_headers = ["ت", "اسم رب الأسرة", card_choice, "الكلي", "مستحق", "محجوب", "الشهر الأول", "الشهر الثاني", "الشهر الثالث", "الشهر الرابع"]
+    if show_children:
+        orig_headers.insert(4, "اطفال")
     dynamic_name_width = Cm(max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15) * 0.22 + 0.5)
     col_widths = [Cm(0.9), dynamic_name_width, Cm(1.8), Cm(0.9), Cm(0.9), Cm(0.9), Cm(2.3), Cm(2.3), Cm(2.3), Cm(2.3)]
+    if show_children:
+        col_widths.insert(4, Cm(0.9))
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
-    remaining_indices = [1, 3, 4, 5, 6, 7, 8, 9] if is_combined else None
+    remaining_indices = ([1, 3, 4, 5, 6, 7, 8, 9, 10] if show_children else [1, 3, 4, 5, 6, 7, 8, 9]) if is_combined else None
 
     headers = (["ت", "القديم", "الحديث"] + [orig_headers[i] for i in remaining_indices]) if is_combined else orig_headers
     table = doc.add_table(rows=1, cols=len(headers))
@@ -943,7 +990,7 @@ def build_professional_word_report_v3(df, filename_base, card_choice, sort_alpha
             cell = hdr_cells[j]
             cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
             title = orig_headers[i]
-            if i in [3, 4, 5]: set_cell_vertical_text(cell)
+            if i in range(3, 6 + offset): set_cell_vertical_text(cell)
             format_cell_advanced(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="left" if i == 1 else "center", color_rgb=COLOR_NAVY_BLUE)
             j += 1
     else:
@@ -951,7 +998,7 @@ def build_professional_word_report_v3(df, filename_base, card_choice, sort_alpha
             cell = table.rows[0].cells[i]
             cell.width = col_widths[i]
             cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-            if i in [3, 4, 5]: set_cell_vertical_text(cell)
+            if i in range(3, 6 + offset): set_cell_vertical_text(cell)
             if i == 2:
                 format_header_cell_two_lines(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", color_rgb=COLOR_NAVY_BLUE)
             else:
@@ -972,6 +1019,16 @@ def build_professional_word_report_v3(df, filename_base, card_choice, sort_alpha
         new_row._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
         is_eligible_zero = int(row["مستحق"]) == 0
 
+        def _v3_cell_value(i, row=row, show_children=show_children, offset=offset):
+            if i == 0: return row["ت"]
+            if i == 1: return row["اسم رب الأسرة"]
+            if i == 2: return row["رقم البطاقة"]
+            if i == 3: return row["الكلي"]
+            if show_children and i == 4: return row["اطفال"]
+            if i == 4 + offset: return row["مستحق"]
+            if i == 5 + offset: return row["محجوب"]
+            return ""
+
         if is_combined:
             cell = row_cells[0]
             cell.width, cell.vertical_alignment = col_widths[0], WD_ALIGN_VERTICAL.CENTER
@@ -989,31 +1046,35 @@ def build_professional_word_report_v3(df, filename_base, card_choice, sort_alpha
                 cell = row_cells[j]
                 cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
                 if i == 1: set_cell_no_wrap(cell)
-                val = row["ت"] if i==0 else row["اسم رب الأسرة"] if i==1 else row["رقم البطاقة"] if i==2 else row["الكلي"] if i==3 else row["مستحق"] if i==4 else row["محجوب"] if i==5 else ""
+                val = _v3_cell_value(i)
+                text_color = RGBColor(230, 126, 34) if show_children and i==4 and int(val) > 0 else None
                 if i == 1:
-                    format_name_cell_with_small_suffix(cell, val, base_size=16, small_size=10, font_name="Calibri", color_rgb=None, align="left")
+                    format_name_cell_with_small_suffix(cell, val, base_size=16, small_size=10, font_name="Calibri", color_rgb=text_color, align="left")
                 else:
-                    format_cell_advanced(cell, val, size_pt=16, font_name="Calibri", color_rgb=None, align="left" if i==1 else "center")
+                    format_cell_advanced(cell, val, size_pt=16, font_name="Calibri", color_rgb=text_color, align="left" if i==1 else "center")
                 if is_eligible_zero: set_cell_background(cell, "EC7063")
                 if i == 3: set_cell_background(cell, "E5E7E9")
-                if i == 5: set_cell_background(cell, "FCF3CF")
+                if show_children and i == 4: set_cell_background(cell, "FDEBD0")
+                if i == 5 + offset: set_cell_background(cell, "FCF3CF")
                 j += 1
         else:
             set_cell_no_wrap(row_cells[1])
-            for i in range(10):
+            for i in range(len(headers)):
                 cell = row_cells[i]
                 cell.width = col_widths[i]
                 cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-                val = row["ت"] if i==0 else row["اسم رب الأسرة"] if i==1 else row["رقم البطاقة"] if i==2 else row["الكلي"] if i==3 else row["مستحق"] if i==4 else row["محجوب"] if i==5 else ""
+                val = _v3_cell_value(i)
+                text_color = RGBColor(230, 126, 34) if show_children and i==4 and int(val) > 0 else None
                 if i == 1:
-                    format_name_cell_with_small_suffix(cell, val, base_size=16, small_size=10, font_name="Calibri", color_rgb=None, align="left")
+                    format_name_cell_with_small_suffix(cell, val, base_size=16, small_size=10, font_name="Calibri", color_rgb=text_color, align="left")
                 else:
-                    format_cell_advanced(cell, val, size_pt=16, font_name="Calibri", color_rgb=None, align="left" if i==1 else "center")
+                    format_cell_advanced(cell, val, size_pt=16, font_name="Calibri", color_rgb=text_color, align="left" if i==1 else "center")
                 if is_eligible_zero: set_cell_background(cell, "EC7063")
                 else:
                     if i == 0: set_cell_background(cell, current_letter_color)
                 if i == 3: set_cell_background(cell, "E5E7E9")
-                if i == 5: set_cell_background(cell, "FCF3CF")
+                if show_children and i == 4: set_cell_background(cell, "FDEBD0")
+                if i == 5 + offset: set_cell_background(cell, "FCF3CF")
     return save_doc_buffer(doc, df)
 
 def build_professional_word_report_v4(df, filename_base, card_choice, sort_alphabetically=True):
@@ -1720,12 +1781,18 @@ def build_professional_word_report_v7(df, filename_base, card_choice, sort_alpha
     title_run.font.name, title_run.font.size, title_run.bold = "Segoe UI Semibold", Pt(14), True
     
     is_combined = card_choice == "القديم والحديث"
+    show_children = "اطفال" in df.columns
+    offset = 1 if show_children else 0
     orig_headers = ["ت", "اسم رب الأسرة", card_choice, "الكلي", "المستحق", "المحجوب", "سكر", "زيت", "تمن", "معجون", "فاصوليا", "عدس", "حمص"]
+    if show_children:
+        orig_headers.insert(4, "اطفال")
     dynamic_name_width = Cm(max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15) * 0.22 + 0.5)
     # تخصيص مساحات ثابتة للمواد (1.1 سم لكل مادة)
     col_widths = [Cm(0.9), dynamic_name_width, Cm(1.8), Cm(0.8), Cm(0.8), Cm(0.8)] + [Cm(1.1)] * 7
+    if show_children:
+        col_widths.insert(4, Cm(0.8))
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
-    remaining_indices = [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] if is_combined else None
+    remaining_indices = ([1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] if show_children else [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) if is_combined else None
 
     headers = (["ت", "القديم", "الحديث"] + [orig_headers[i] for i in remaining_indices]) if is_combined else orig_headers
     table = doc.add_table(rows=1, cols=len(headers))
@@ -1780,6 +1847,16 @@ def build_professional_word_report_v7(df, filename_base, card_choice, sort_alpha
         new_row._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
         is_eligible_zero = int(row["مستحق"]) == 0
 
+        def _v7_cell_value(i, row=row, show_children=show_children, offset=offset):
+            if i == 0: return row["ت"]
+            if i == 1: return row["اسم رب الأسرة"]
+            if i == 2: return row["رقم البطاقة"]
+            if i == 3: return row["الكلي"]
+            if show_children and i == 4: return row["اطفال"]
+            if i == 4 + offset: return row["مستحق"]
+            if i == 5 + offset: return row["محجوب"]
+            return ""
+
         if is_combined:
             cell = row_cells[0]
             cell.width, cell.vertical_alignment = col_widths[0], WD_ALIGN_VERTICAL.CENTER
@@ -1797,40 +1874,44 @@ def build_professional_word_report_v7(df, filename_base, card_choice, sort_alpha
                 cell = row_cells[j]
                 cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
                 if i == 1: set_cell_no_wrap(cell)
-                val = row["ت"] if i == 0 else row["اسم رب الأسرة"] if i == 1 else row["رقم البطاقة"] if i == 2 else row["الكلي"] if i == 3 else row["مستحق"] if i == 4 else row["محجوب"] if i == 5 else ""
+                val = _v7_cell_value(i)
                 cell_align = "left" if i == 1 else "center"
+                text_color = RGBColor(230, 126, 34) if show_children and i==4 and int(val) > 0 else None
                 if i == 1:
-                    format_name_cell_with_small_suffix(cell, val, base_size=14, small_size=10, font_name="Calibri", color_rgb=None, align="left")
+                    format_name_cell_with_small_suffix(cell, val, base_size=14, small_size=10, font_name="Calibri", color_rgb=text_color, align="left")
                 else:
-                    format_cell_advanced(cell, val, size_pt=14, font_name="Calibri", color_rgb=None, align=cell_align)
+                    format_cell_advanced(cell, val, size_pt=14, font_name="Calibri", color_rgb=text_color, align=cell_align)
                 if is_eligible_zero:
                     set_cell_background(cell, "EC7063")
                 else:
                     if i == 3: set_cell_background(cell, "EBF5FB")
-                    elif i == 4: set_cell_background(cell, "E8F8F5")
-                    elif i == 5: set_cell_background(cell, "FADBD8")
+                    elif show_children and i == 4: set_cell_background(cell, "FDEBD0")
+                    elif i == 4 + offset: set_cell_background(cell, "E8F8F5")
+                    elif i == 5 + offset: set_cell_background(cell, "FADBD8")
                 j += 1
         else:
             set_cell_no_wrap(row_cells[1])
-            for i in range(13):
+            for i in range(len(headers)):
                 cell = row_cells[i]
                 cell.width = col_widths[i]
                 cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-                val = row["ت"] if i == 0 else row["اسم رب الأسرة"] if i == 1 else row["رقم البطاقة"] if i == 2 else row["الكلي"] if i == 3 else row["مستحق"] if i == 4 else row["محجوب"] if i == 5 else ""
+                val = _v7_cell_value(i)
                 cell_align = "left" if i == 1 else "center"
+                text_color = RGBColor(230, 126, 34) if show_children and i==4 and int(val) > 0 else None
 
                 if i == 1:
-                    format_name_cell_with_small_suffix(cell, val, base_size=14, small_size=10, font_name="Calibri", color_rgb=None, align="left")
+                    format_name_cell_with_small_suffix(cell, val, base_size=14, small_size=10, font_name="Calibri", color_rgb=text_color, align="left")
                 else:
-                    format_cell_advanced(cell, val, size_pt=14, font_name="Calibri", color_rgb=None, align=cell_align)
+                    format_cell_advanced(cell, val, size_pt=14, font_name="Calibri", color_rgb=text_color, align=cell_align)
 
                 if is_eligible_zero:
                     set_cell_background(cell, "EC7063")
                 else:
                     if i == 0: set_cell_background(cell, current_letter_color)
                     elif i == 3: set_cell_background(cell, "EBF5FB")
-                    elif i == 4: set_cell_background(cell, "E8F8F5")
-                    elif i == 5: set_cell_background(cell, "FADBD8")
+                    elif show_children and i == 4: set_cell_background(cell, "FDEBD0")
+                    elif i == 4 + offset: set_cell_background(cell, "E8F8F5")
+                    elif i == 5 + offset: set_cell_background(cell, "FADBD8")
 
     return save_doc_buffer(doc, df)
 
@@ -1986,6 +2067,7 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
     page_size = "A4"
     is_combined = card_choice == "القديم والحديث"
     card_cols = ["القديم", "الحديث"] if is_combined else [card_choice]
+    show_children = "اطفال" in df.columns
 
     if template_choice == "النموذج الأول (الأصلي المطور)":
         headers = ["ت"] + card_cols + ["اسم رب الأسرة", "حقل فارغ", "الكلي", "مستحق", "محجوب", "ملاحظات"] if is_combined else ["ت", "اسم رب الأسرة", "حقل فارغ", "الكلي", "مستحق", "محجوب", card_choice, "ملاحظات"]
@@ -2021,6 +2103,13 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
         headers = ["ت", "اسم رب الأسرة", "عدد الأفراد المستحقة", "حقل كبير فارغ", "حقل كبير فارغ"]
         page_size = "A3"
         page_orientation = "landscape"
+
+    # فلتر الأطفال: يُدرج عمود "اطفال" مباشرة بجانب "الكلي" — يعمل فقط في
+    # النماذج التي تعرض أعمدة الكلي/مستحق/محجوب الثلاثة منفصلة (الأول، الثاني،
+    # الثالث، السابع)؛ باقي النماذج ليس فيها عمود بعنوان "الكلي" أصلاً فلا يُلمس.
+    kuli_insert_idx = headers.index("الكلي") + 1 if (show_children and "الكلي" in headers) else None
+    if kuli_insert_idx is not None:
+        headers.insert(kuli_insert_idx, "اطفال")
 
     rows_html = ""
     prev_letter = None
@@ -2188,6 +2277,11 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
                 ("XXXXXXXXXXXX" if is_eligible_zero else "", "")
             ]
 
+        if kuli_insert_idx is not None:
+            children_val = int(row["اطفال"])
+            children_style = "background-color: #FDEBD0; color: #B9770E; font-weight: bold;" if children_val > 0 and not is_eligible_zero else ("background-color: #FDEBD0;" if not is_eligible_zero else "")
+            vals.insert(kuli_insert_idx, (children_val, children_style))
+
         for val, style in vals:
             cell_style = f"{row_bg} {style}"
             cells_html += f'<td style="{cell_style}">{val}</td>'
@@ -2200,7 +2294,7 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
     # سابقة بتدوير النص 90 درجة أنتجت خطوطاً عربية متكسّرة غير مقروءة فاستُبعدت.
     # لا يُطبَّق أي من هذا على قوالب أخرى (السلال، النموذج التاسع...) تجنباً
     # لأي تغيير غير مطلوب في تصاميمها.
-    COMPACT_HEADERS = {"الكلي", "مستحق", "المستحق", "العدد المستحق", "محجوب", "المحجوب"}
+    COMPACT_HEADERS = {"الكلي", "مستحق", "المستحق", "العدد المستحق", "محجوب", "المحجوب", "اطفال"}
     # عرض عمود الاسم يجب أن يتسع لأطول اسم فعلي بالملف دون التفاف (النص مقفل
     # بلا لف)، وإلا انسكب بصرياً على العمود المجاور — عمود مقاس بنص ثابت لا
     # يتحمل نصاً متغير الطول أقصر مما يحتاجه أطول اسم حقيقي بالبيانات.
@@ -2216,6 +2310,8 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
             # تفيض أصلاً مع خط Aref Ruqaa العريض).
             return f'<th{style_attr}>{h}</th>'
         pill_extra = " pill-tight" if use_compact_columns else ""
+        if h == "اطفال":
+            return f'<th><span class="pill{pill_extra} pill-amber"{style_attr}>{h}</span></th>'
         if "كلي" in h:
             return f'<th><span class="pill{pill_extra} pill-blue"{style_attr}>{h}</span></th>'
         if "مستحق" in h:
@@ -2537,6 +2633,7 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
             .pill-blue {{ background-color: #D6E9FA; color: #1F618D; }}
             .pill-green {{ background-color: #D3F3E8; color: #117864; }}
             .pill-red {{ background-color: #FBD9D3; color: #C0392B; }}
+            .pill-amber {{ background-color: #FDEBD0; color: #B9770E; }}
             .pill-tight {{
                 padding: 3px 1px;
                 font-size: 10pt;
@@ -2751,6 +2848,12 @@ sort_choice = st.radio(
 sort_alphabetically = (sort_choice != SORT_KEEP_ORIGINAL)
 sort_by_card_within_group = (sort_choice == SORT_ALPHA_WITH_OLD_CARD)
 
+show_children_filter = st.checkbox(
+    "👶 فلتر الأطفال: إضافة عمود \"أطفال\" عند وجود فرق بين الكلي والمستحق + المحجوب "
+    "(يعمل فقط في النماذج: الأول، الثاني، الثالث، السابع — لأنها الوحيدة التي تحتوي أعمدة الكلي/مستحق/محجوب منفصلة)",
+    value=False
+)
+
 st.markdown("<br>", unsafe_allow_html=True)
 
 if uploaded_files:
@@ -2760,7 +2863,8 @@ if uploaded_files:
         st.session_state.template_choice != template_choice or
         st.session_state.name_choice != name_length_choice or
         st.session_state.sort_choice != sort_choice or
-        st.session_state.merge_choice != merge_choice):
+        st.session_state.merge_choice != merge_choice or
+        st.session_state.get("show_children_filter") != show_children_filter):
         st.session_state.processing_done = False
 
 if st.button("⚙️ تشغيل محرك التنظيم والتنسيق المتقدم الكلي"):
@@ -2803,6 +2907,9 @@ if st.button("⚙️ تشغيل محرك التنظيم والتنسيق الم�
                     for item in results:
                         if "_old_card_sort" in item["df"].columns:
                             item["df"] = item["df"].drop(columns=["_old_card_sort"])
+                        if show_children_filter:
+                            children_diff = item["df"]["الكلي"] - (item["df"]["مستحق"] + item["df"]["محجوب"])
+                            item["df"]["اطفال"] = children_diff.clip(lower=0)
 
                     st.session_state.results = results
                     st.session_state.uploaded_filenames = [f.name for f in uploaded_files]
@@ -2811,6 +2918,7 @@ if st.button("⚙️ تشغيل محرك التنظيم والتنسيق الم�
                     st.session_state.name_choice = name_length_choice
                     st.session_state.sort_choice = sort_choice
                     st.session_state.merge_choice = merge_choice
+                    st.session_state.show_children_filter = show_children_filter
                     st.session_state.extraction_warnings = file_warnings
                     st.session_state.processing_done = True
                 else:
