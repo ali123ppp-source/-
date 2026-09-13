@@ -1621,8 +1621,8 @@ def build_professional_word_report_v10(df, filename_base, card_choice, sort_alph
     return save_doc_buffer(doc, df)
 
 # النموذج الحادي عشر: نفس ترتيب أعمدة النموذج العاشر (ت/الاسم/المستحق/حقل
-# فارغ) لكن بثيم أخضر (رأس جدول أخضر، صفوف خضراء فاتحة متناوبة) وخط Cairo
-# العربي العصري المستدير بدل Segoe UI Semibold.
+# فارغ) لكن بثيم أخضر (رأس جدول أخضر، صفوف خضراء فاتحة متناوبة) وخط
+# Aref Ruqaa (خط رقعة عربي قريب لخط اليد) بدل Segoe UI Semibold.
 def build_professional_word_report_v11(df, filename_base, card_choice, sort_alphabetically=True):
     doc = Document()
     setup_document_layout(doc, filename_base)
@@ -1634,7 +1634,7 @@ def build_professional_word_report_v11(df, filename_base, card_choice, sort_alph
     title_p = doc.add_paragraph()
     title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     title_run = title_p.add_run(f"الكشف الإحصائي المنسق للوكيل: {clean_name}")
-    title_run.font.name, title_run.font.size, title_run.bold = "Cairo", Pt(14), True
+    title_run.font.name, title_run.font.size, title_run.bold = "Aref Ruqaa", Pt(14), True
 
     dynamic_name_width = Cm(max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15) * 0.22 + 0.5)
     headers = ["ت", "الاسم", "المستحق", "حقل فارغ"]
@@ -1652,7 +1652,7 @@ def build_professional_word_report_v11(df, filename_base, card_choice, sort_alph
     for i, title in enumerate(headers):
         cell = hdr_cells[i]
         cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
-        format_cell_advanced(cell, title, bold=True, size_pt=14, font_name="Cairo", align="center", color_rgb=COLOR_WHITE)
+        format_cell_advanced(cell, title, bold=True, size_pt=14, font_name="Aref Ruqaa", align="center", color_rgb=COLOR_WHITE)
         set_cell_background(cell, GREEN_DARK)
 
     prev_letter = None
@@ -1672,23 +1672,23 @@ def build_professional_word_report_v11(df, filename_base, card_choice, sort_alph
 
         cell = row_cells[0]
         cell.width, cell.vertical_alignment = col_widths[0], WD_ALIGN_VERTICAL.CENTER
-        format_cell_advanced(cell, row["ت"], size_pt=14, font_name="Cairo", align="center")
+        format_cell_advanced(cell, row["ت"], size_pt=14, font_name="Aref Ruqaa", align="center")
         set_cell_background(cell, current_letter_color)
 
         cell = row_cells[1]
         cell.width, cell.vertical_alignment = col_widths[1], WD_ALIGN_VERTICAL.CENTER
         set_cell_no_wrap(cell)
-        format_cell_advanced(cell, row["اسم رب الأسرة"], size_pt=16, font_name="Cairo", align="right")
+        format_cell_advanced(cell, row["اسم رب الأسرة"], size_pt=16, font_name="Aref Ruqaa", align="right")
         if row_bg: set_cell_background(cell, row_bg)
 
         cell = row_cells[2]
         cell.width, cell.vertical_alignment = col_widths[2], WD_ALIGN_VERTICAL.CENTER
-        format_cell_advanced(cell, row["مستحق"], size_pt=14, font_name="Cairo", align="center")
+        format_cell_advanced(cell, row["مستحق"], size_pt=14, font_name="Aref Ruqaa", align="center")
         set_cell_background(cell, row_bg or GREEN_LIGHT)
 
         cell = row_cells[3]
         cell.width, cell.vertical_alignment = col_widths[3], WD_ALIGN_VERTICAL.CENTER
-        format_cell_advanced(cell, "", size_pt=14, font_name="Cairo", align="center")
+        format_cell_advanced(cell, "", size_pt=14, font_name="Aref Ruqaa", align="center")
         if row_bg: set_cell_background(cell, row_bg)
 
     return save_doc_buffer(doc, df)
@@ -1901,33 +1901,26 @@ def get_pdf_font_face_css():
     regular = _get_embedded_font_base64("Tajawal-Regular.ttf")
     bold = _get_embedded_font_base64("Tajawal-Bold.ttf")
     extrabold = _get_embedded_font_base64("Tajawal-ExtraBold.ttf")
-    cairo_regular = _get_embedded_font_base64("Cairo-Regular.ttf")
-    cairo_bold = _get_embedded_font_base64("Cairo-Bold.ttf")
-    cairo_extrabold = _get_embedded_font_base64("Cairo-ExtraBold.ttf")
+    ruqaa_regular = _get_embedded_font_base64("ArefRuqaa-Regular.ttf")
+    ruqaa_bold = _get_embedded_font_base64("ArefRuqaa-Bold.ttf")
     if not (regular and bold and extrabold):
         return ""
-    cairo_css = ""
-    if cairo_regular and cairo_bold and cairo_extrabold:
-        # خط Cairo: خط عربي عصري مستدير أنيق، يُستخدم فقط بالقوالب التي
-        # تطلب صراحةً خطاً "يميل للخط العربي الجميل" بدل Tajawal الافتراضي.
-        cairo_css = f"""
+    ruqaa_css = ""
+    if ruqaa_regular and ruqaa_bold:
+        # خط Aref Ruqaa: خط عربي مبني على خط الرقعة (خط اليد اليومي)، يُستخدم
+        # فقط بالقوالب التي تطلب صراحةً خطاً "قريباً لخط اليد" بدل Tajawal.
+        ruqaa_css = f"""
             @font-face {{
-                font-family: 'Cairo';
+                font-family: 'Aref Ruqaa';
                 font-weight: 400;
                 font-style: normal;
-                src: url(data:font/ttf;base64,{cairo_regular}) format('truetype');
+                src: url(data:font/ttf;base64,{ruqaa_regular}) format('truetype');
             }}
             @font-face {{
-                font-family: 'Cairo';
+                font-family: 'Aref Ruqaa';
                 font-weight: 700;
                 font-style: normal;
-                src: url(data:font/ttf;base64,{cairo_bold}) format('truetype');
-            }}
-            @font-face {{
-                font-family: 'Cairo';
-                font-weight: 800;
-                font-style: normal;
-                src: url(data:font/ttf;base64,{cairo_extrabold}) format('truetype');
+                src: url(data:font/ttf;base64,{ruqaa_bold}) format('truetype');
             }}
         """
     return f"""
@@ -1949,7 +1942,7 @@ def get_pdf_font_face_css():
                 font-style: normal;
                 src: url(data:font/ttf;base64,{extrabold}) format('truetype');
             }}
-            {cairo_css}
+            {ruqaa_css}
     """
 
 # -----------------------------------------------------------------------------
@@ -1971,7 +1964,7 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
     body_bg_image_css = "none" if is_green_theme else "radial-gradient(circle, #DCE4F0 1px, transparent 1px)"
     body_bg_size_css = "0 0" if is_green_theme else "16px 16px"
     card_border_css = "1.5px solid #A5D6A7" if is_green_theme else "2.5px solid #1B3A63"
-    card_radius_css = "0px" if is_green_theme else "20px"
+    card_radius_css = "14px" if is_green_theme else "20px"
 
     total_all = df["الكلي"].astype(int).sum()
     total_eligible = df["مستحق"].astype(int).sum()
@@ -2204,8 +2197,13 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
     use_compact_columns = any(h in COMPACT_HEADERS for h in headers)
 
     def _header_cell_html(h, extra_style=""):
-        pill_extra = " pill-tight" if use_compact_columns else ""
         style_attr = f' style="{extra_style}"' if extra_style else ""
+        if is_green_theme:
+            # طلب صريح: يطابق تصميم الصورة المرجعية — عنوان نصي عادي أبيض
+            # غامق على الخلفية الخضراء مباشرة، بلا شارة/فقاعة ملوّنة (التي
+            # تفيض أصلاً مع خط Aref Ruqaa العريض).
+            return f'<th{style_attr}>{h}</th>'
+        pill_extra = " pill-tight" if use_compact_columns else ""
         if "كلي" in h:
             return f'<th><span class="pill{pill_extra} pill-blue"{style_attr}>{h}</span></th>'
         if "مستحق" in h:
@@ -2576,12 +2574,12 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
             }}
             /* طلب صريح: قالب بديل (ثيم أخضر) بنفس ترتيب أعمدة النموذج
                العاشر (ت/الاسم/المستحق/حقل فارغ) يطابق تصميم الصورة المرجعية
-               100% — رأس وصفوف خضراء متناوبة، جدول مسطّح بلا إطار بطاقة
-               زخرفي، مربع فارغ مستدير الحواف بدل الخلية الفارغة العادية،
-               بخط Cairo (خط عربي عصري مستدير يميل للجمال) — مقصور على هذا
-               القالب فقط عبر صنف table.theme-green. */
+               — رأس وصفوف خضراء متناوبة، حواف الجدول ناعمة مدوّرة، مربع
+               فارغ مستدير الحواف بدل الخلية الفارغة العادية، بخط Aref Ruqaa
+               (مبني على خط الرقعة، أقرب لخط اليد) — مقصور على هذا القالب
+               فقط عبر صنف table.theme-green. */
             table.theme-green, table.theme-green th, table.theme-green td {{
-                font-family: 'Cairo', 'Tajawal', 'Segoe UI Semibold', sans-serif;
+                font-family: 'Aref Ruqaa', 'Tajawal', 'Segoe UI Semibold', serif;
             }}
             table.theme-green th {{
                 background-color: #43A047;
@@ -2597,10 +2595,10 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
             }}
             .green-checkbox {{
                 display: inline-block;
-                width: 34px;
-                height: 26px;
+                width: 43px;
+                height: 33px;
                 border: 2px solid #333333;
-                border-radius: 7px;
+                border-radius: 9px;
                 background-color: #FFFFFF;
             }}
         </style>
