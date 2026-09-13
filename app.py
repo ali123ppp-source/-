@@ -1916,7 +1916,7 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
             vals = [
                 (row["ت"], ter_bg),
                 *card_vals,
-                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 14pt;"),
+                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 7pt;"),
                 (row["الكلي"], "background-color: #E8F8F5;" if not is_eligible_zero else "")
             ] + [("", "")] * 12
         elif template_choice == "النموذج السادس (12 سلة، العدد المستحق)":
