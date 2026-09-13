@@ -231,6 +231,17 @@ def get_name_group_letter(name):
         return "ا"
     return first
 
+def _html_name_with_small_fourth_word(name, small_size_pt=8):
+    """طلب صريح: الاسم الرابع (الكلمة الرابعة من اسم رب الأسرة، مثل "عبيد" في
+    "علي صباح حسن عبيد") يُعرض بحجم خط أصغر (8) من باقي كلمات الاسم — وليس
+    تصغير عرض الحقل. تُطبَّق فقط على أسماء تضم 4 كلمات فعلاً فأكثر؛ الاسم
+    الثلاثي يبقى دون أي تغيير."""
+    words = str(name).split()
+    if len(words) < 4:
+        return name
+    words[3] = f'<span style="font-size: {small_size_pt}pt;">{words[3]}</span>'
+    return " ".join(words)
+
 def get_letter_base_color(letter):
     """اللون الأساسي المشبع للحرف (يُستخدم لنص البانر)."""
     return ARABIC_LETTER_BANNER_COLORS.get(letter, "5D6D7E")
@@ -1841,6 +1852,7 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
 
         cells_html = ""
 
+        display_name = _html_name_with_small_fourth_word(row["اسم رب الأسرة"])
         card_vals = [(row["رقم البطاقة القديم"], "font-size: 11.07pt;"), (row["رقم البطاقة الحديث"], "font-size: 11.07pt;")] if is_combined else [(row["رقم البطاقة"], "font-size: 11.07pt;")]
 
         if template_choice == "النموذج الأول (الأصلي المطور)":
@@ -1848,7 +1860,7 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
                 vals = [
                     (row["ت"], ter_bg),
                     *card_vals,
-                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 14pt;"),
+                    (display_name, "text-align: right; font-weight: bold; font-size: 14pt;"),
                     ("x" if is_eligible_zero else "", ""),
                     (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
                     (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
@@ -1858,7 +1870,7 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
             else:
                 vals = [
                     (row["ت"], ter_bg),
-                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 14pt;"),
+                    (display_name, "text-align: right; font-weight: bold; font-size: 14pt;"),
                     ("x" if is_eligible_zero else "", ""),
                     (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
                     (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
@@ -1871,7 +1883,7 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
                 vals = [
                     (row["ت"], ter_bg),
                     *card_vals,
-                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 14pt;"),
+                    (display_name, "text-align: right; font-weight: bold; font-size: 14pt;"),
                     ("x" if is_eligible_zero else "", ""),
                     ("x" if is_eligible_zero else "", ""),
                     (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
@@ -1882,7 +1894,7 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
             else:
                 vals = [
                     (row["ت"], ter_bg),
-                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 14pt;"),
+                    (display_name, "text-align: right; font-weight: bold; font-size: 14pt;"),
                     ("x" if is_eligible_zero else "", ""),
                     ("x" if is_eligible_zero else "", ""),
                     (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
@@ -1896,7 +1908,7 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
                 vals = [
                     (row["ت"], ter_bg),
                     *card_vals,
-                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 14pt;"),
+                    (display_name, "text-align: right; font-weight: bold; font-size: 14pt;"),
                     (row["الكلي"], "background-color: #E5E7E9;" if not is_eligible_zero else ""),
                     (row["مستحق"], ""),
                     (row["محجوب"], "background-color: #FCF3CF;" if not is_eligible_zero else ""),
@@ -1905,7 +1917,7 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
             else:
                 vals = [
                     (row["ت"], ter_bg),
-                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 14pt;"),
+                    (display_name, "text-align: right; font-weight: bold; font-size: 14pt;"),
                     *card_vals,
                     (row["الكلي"], "background-color: #E5E7E9;" if not is_eligible_zero else ""),
                     (row["مستحق"], ""),
@@ -1916,21 +1928,21 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
             vals = [
                 (row["ت"], ter_bg),
                 *card_vals,
-                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 7pt;"),
+                (display_name, "text-align: right; font-weight: bold; font-size: 14pt;"),
                 (row["الكلي"], "background-color: #E8F8F5;" if not is_eligible_zero else "")
             ] + [("", "")] * 12
         elif template_choice == "النموذج السادس (12 سلة، العدد المستحق)":
             vals = [
                 (row["ت"], ter_bg),
                 *card_vals,
-                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 14pt;"),
+                (display_name, "text-align: right; font-weight: bold; font-size: 14pt;"),
                 (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else "")
             ] + [("", "")] * 12
         elif template_choice == "النموذج الثامن (8 سلات، العدد المستحق)":
             vals = [
                 (row["ت"], ter_bg),
                 *card_vals,
-                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 14pt;"),
+                (display_name, "text-align: right; font-weight: bold; font-size: 14pt;"),
                 (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else "")
             ] + [("", "")] * 8
         elif template_choice == "النموذج السابع (تفصيل المواد الغذائية)":
@@ -1938,7 +1950,7 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
                 vals = [
                     (row["ت"], ter_bg),
                     *card_vals,
-                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 14pt;"),
+                    (display_name, "text-align: right; font-weight: bold; font-size: 14pt;"),
                     (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
                     (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
                     (row["محجوب"], "background-color: #FADBD8;" if not is_eligible_zero else ""),
@@ -1947,7 +1959,7 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
             else:
                 vals = [
                     (row["ت"], ter_bg),
-                    (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 14pt;"),
+                    (display_name, "text-align: right; font-weight: bold; font-size: 14pt;"),
                     *card_vals,
                     (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
                     (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
@@ -1957,13 +1969,13 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
         elif template_choice == "النموذج التاسع (توزيع مواد غذائية، بدون رقم بطاقة)":
             vals = [
                 (row["ت"], ter_bg),
-                (row["اسم رب الأسرة"], "text-align: right; font-weight: bold; font-size: 12pt;"),
+                (display_name, "text-align: right; font-weight: bold; font-size: 12pt;"),
                 (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else "")
             ] + [("", "")] * 7
         else:
             vals = [
                 (row["ت"], ter_bg),
-                (row["اسم رب الأسرة"], f"text-align: right; font-weight: bold; font-size: 14pt; color: {'#FF0000' if is_eligible_zero else '#0070C0'};"),
+                (display_name, f"text-align: right; font-weight: bold; font-size: 14pt; color: {'#FF0000' if is_eligible_zero else '#0070C0'};"),
                 ("x" if is_eligible_zero else row["مستحق"], ""),
                 ("XXXXXXXXXXXX" if is_eligible_zero else "", ""),
                 ("XXXXXXXXXXXX" if is_eligible_zero else "", "")
