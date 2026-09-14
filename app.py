@@ -401,16 +401,119 @@ def _locate_header_row(rows_data):
 
     return -1, empty_idx_map
 
-def _extract_records_by_headers(rows_data, card_choice, name_length_choice):
+def _idx_hit_rate_arabic(rows, idx, sample_size=12):
+    """نسبة الصفوف (من عيّنة أولى) التي يحوي عمودها بالمؤشّر idx نصاً عربياً
+    فعلاً بلا أرقام — يُستخدم لتحديد أي عمود هو 'اسم' الحقيقي."""
+    if idx < 0:
+        return 0.0
+    checked, hits = 0, 0
+    for row in rows:
+        if idx >= len(row):
+            continue
+        val = row[idx]
+        if not val or not str(val).strip():
+            continue
+        checked += 1
+        if any('؀' <= ch <= 'ۿ' for ch in val) and not any(ch.isdigit() for ch in val):
+            hits += 1
+        if checked >= sample_size:
+            break
+    return (hits / checked) if checked else 0.0
+
+
+def _idx_hit_rate_small_int(rows, idx, sample_size=12, max_val=100):
+    """نسبة الصفوف (من عيّنة أولى) التي يحوي عمودها بالمؤشّر idx رقماً صحيحاً
+    صغيراً (بحدود عدد أفراد الأسرة) — يُستخدم لتحديد أعمدة الكلي/المستحق/المحجوب."""
+    if idx < 0:
+        return 0.0
+    checked, hits = 0, 0
+    for row in rows:
+        if idx >= len(row):
+            continue
+        val = str(row[idx]).strip()
+        if not val:
+            continue
+        checked += 1
+        if val.isdigit() and int(val) <= max_val:
+            hits += 1
+        if checked >= sample_size:
+            break
+    return (hits / checked) if checked else 0.0
+
+
+# أعمدة الاسم والبطاقة/ت تتحرك معاً دائماً كوحدة واحدة بكل الملفات المرصودة
+# (رقم البطاقة والتسلسل يلاصقان الاسم مباشرة)، بعكس أعمدة الإجماليات الثلاثة
+# التي قد تنزلق بمعزل عنها (كعمود فارغ إضافي بين "الكلي" و"اسم رب الأسرة"
+# بورقة أولى غير موجود بورقة لاحقة بالملف نفسه) — لذا تُعالَج كل مجموعة
+# بإزاحة مستقلة بدل إزاحة واحدة موحّدة لكل الخريطة، وإلا أفسدت إزاحة "اسم"
+# قيم الكلي/المستحق/المحجوب الصحيحة أصلاً بلا داعٍ.
+_NAME_CHAIN_FIELDS = ["اسم", "بطاقة_قديم", "بطاقة_حديث", "ت"]
+_TOTALS_CHAIN_FIELDS = ["محجوب", "مستحق", "كلي"]
+
+
+def _adapt_idx_map_to_rows(rows, idx_map, max_shift=3, sample_size=12, min_score=0.6):
+    """يحاول تصحيح خريطة أعمدة موروثة (من ورقة/جدول سابق) لتلائم صفوف ورقة
+    لاحقة بلا صف عناوين خاص بها. يبحث عن إزاحة لسلسلة الاسم (بالاعتماد على
+    محتواها العربي) وإزاحة أخرى مستقلة لسلسلة الإجماليات (بالاعتماد على كونها
+    أرقاماً صحيحة صغيرة)، ويُطبّق كل إزاحة فقط على سلسلتها. يُرجع الخريطة
+    المُصحَّحة، أو None إذا تعذّر إيجاد إزاحة مقبولة لأي من السلسلتين (لتجنّب
+    استخراج بيانات مغلوطة بصمت)."""
+    name_idx = idx_map.get("اسم", -1)
+    best_name_shift, best_name_score = 0, _idx_hit_rate_arabic(rows, name_idx, sample_size)
+    for shift in list(range(-1, -max_shift - 1, -1)) + list(range(1, max_shift + 1)):
+        score = _idx_hit_rate_arabic(rows, name_idx + shift, sample_size)
+        if score > best_name_score:
+            best_name_shift, best_name_score = shift, score
+
+    def totals_score(shift):
+        rates = [
+            _idx_hit_rate_small_int(rows, idx_map.get(field, -1) + shift, sample_size)
+            for field in _TOTALS_CHAIN_FIELDS if idx_map.get(field, -1) != -1
+        ]
+        return min(rates) if rates else 0.0
+
+    best_totals_shift, best_totals_score = 0, totals_score(0)
+    for shift in list(range(-1, -max_shift - 1, -1)) + list(range(1, max_shift + 1)):
+        score = totals_score(shift)
+        if score > best_totals_score:
+            best_totals_shift, best_totals_score = shift, score
+
+    if best_name_score < min_score and best_totals_score < min_score:
+        return None
+
+    adapted = dict(idx_map)
+    if best_name_score >= min_score:
+        for field in _NAME_CHAIN_FIELDS:
+            if adapted.get(field, -1) != -1:
+                adapted[field] += best_name_shift
+    if best_totals_score >= min_score:
+        for field in _TOTALS_CHAIN_FIELDS:
+            if adapted.get(field, -1) != -1:
+                adapted[field] += best_totals_shift
+    return adapted
+
+
+def _extract_records_by_headers(rows_data, card_choice, name_length_choice, external_idx_map=None, _out_idx_map=None):
     header_idx, idx_map = _locate_header_row(rows_data)
     required = ["اسم", "مستحق"]
     if header_idx == -1 or any(idx_map[k] == -1 for k in required):
-        return None
+        if external_idx_map is None:
+            return None
+        adapted = _adapt_idx_map_to_rows(rows_data, external_idx_map)
+        if adapted is None:
+            return None
+        idx_map = adapted
+        start_row = 0
+    else:
+        start_row = header_idx + 1
+
+    if _out_idx_map is not None:
+        _out_idx_map.append(idx_map)
 
     take = 4 if name_length_choice == "الاسم الرباعي (إن وجد)" else 3
     footer_label_re = re.compile(r'(ال)?(مجموع|اجمالي|وكيل)$')
     records = []
-    for i in range(header_idx + 1, len(rows_data)):
+    for i in range(start_row, len(rows_data)):
         row = rows_data[i]
         row_joined = "".join(row)
         if not row_joined:
@@ -467,6 +570,28 @@ def _extract_records_by_headers(rows_data, card_choice, name_length_choice):
         })
 
     return records
+
+
+def _extract_records_multi_sheet(sheet_chunks, card_choice, name_length_choice):
+    """يعالج كل ورقة/جدول منفصلة (sheet_chunks: قائمة قوائم صفوف) بخريطة
+    أعمدة خاصة بها إن وُجد لها صف عناوين، وإلا يرث خريطة آخر ورقة نجحت
+    ويحاول تكييفها لصفوفها (انظر _adapt_idx_map_to_rows) — يمنع هذا اختلاط
+    تخطيط أعمدة مختلف قليلاً بين أوراق ملف واحد (مثل عمود فارغ إضافي بالورقة
+    الأولى غير موجود بالورقة الثانية، أو ورقة لاحقة بلا صف عناوين إطلاقاً)
+    من إفساد الاستخراج الصامت لبقية الورقات."""
+    all_records = []
+    carried_idx_map = None
+    for rows in sheet_chunks:
+        if not rows:
+            continue
+        out_box = []
+        records = _extract_records_by_headers(rows, card_choice, name_length_choice, carried_idx_map, out_box)
+        if records is None:
+            continue
+        all_records.extend(records)
+        if out_box:
+            carried_idx_map = out_box[0]
+    return all_records
 
 def _validate_extracted_records(records):
     """فحص أمان: يبحث عن مؤشرات على خطأ بتحديد مكان الأعمدة (كأن ينزلق رقم البطاقة إلى عمود الكلي)
@@ -561,6 +686,12 @@ def extract_and_clean_data(file_obj, card_choice, name_length_choice, sort_alpha
     # مصدر منفصل تماماً لاستخراج بيانات الوكيل (مركز/رقم وكالة/اسم) — لا يُمرَّر
     # أبداً لمحرك استخراج سجلات الجدول، فلا خطر من أي تأثير متبادل بينهما.
     metadata_rows = []
+    # صفوف كل ورقة/جدول منفصلة عن الأخرى (بعكس rows_data المُسطَّحة أعلاه) —
+    # ضرورية لمعالجة كل ورقة بخريطة أعمدة خاصة بها (انظر _extract_records_multi_sheet)،
+    # إذ قد يختلف تخطيط الأعمدة قليلاً بين ورقة وأخرى بالملف نفسه (كعمود فارغ
+    # إضافي بالورقة الأولى، أو ورقة لاحقة بلا صف عناوين إطلاقاً لأنها استمرار
+    # لجدول الورقة السابقة).
+    sheet_chunks = []
 
     file_ext = file_obj.name.split('.')[-1].lower()
 
@@ -574,15 +705,19 @@ def extract_and_clean_data(file_obj, card_choice, name_length_choice, sort_alpha
             if sep and value.strip():
                 metadata_rows.append([label.strip(), value.strip()])
         for table in doc.tables:
+            table_rows = []
             for row in table.rows:
                 cells = [_extract_full_oxml_text(cell._tc) for cell in row.cells]
                 rows_data.append(cells)
                 metadata_rows.append(cells)
+                table_rows.append(cells)
+            sheet_chunks.append(table_rows)
 
     elif file_ext == 'xlsx':
         xls = pd.ExcelFile(file_obj)
         for sheet_name in xls.sheet_names:
             df_excel = pd.read_excel(xls, sheet_name=sheet_name, header=None)
+            sheet_rows = []
             for row in df_excel.values:
                 cells = []
                 for cell in row:
@@ -594,10 +729,12 @@ def extract_and_clean_data(file_obj, card_choice, name_length_choice, sort_alpha
                         cells.append(str(cell).strip().replace('\n', ' '))
                 rows_data.append(cells)
                 metadata_rows.append(cells)
+                sheet_rows.append(cells)
+            sheet_chunks.append(sheet_rows)
 
     agent_metadata = _extract_agent_metadata(metadata_rows)
 
-    header_records = _extract_records_by_headers(rows_data, card_choice, name_length_choice)
+    header_records = _extract_records_multi_sheet(sheet_chunks, card_choice, name_length_choice)
     if header_records:
         warnings = _validate_extracted_records(header_records)
         df = pd.DataFrame(header_records)

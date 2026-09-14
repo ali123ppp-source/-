@@ -91,6 +91,37 @@ def test_real_world_layout_with_blank_column():
         check("real_world_layout: مستحق correct", r["مستحق"] == 5, detail=str(r))
         check("real_world_layout: محجوب correct", r["محجوب"] == 0, detail=str(r))
 
+# ---------------------------------------------------------------------------
+# 1أ) ملف حقيقي مشخَّص هذه الجلسة: xlsx بثلاث ورقات (Table 1/2/3) تمثّل
+#     استمرار الجدول نفسه، لكن الورقة الأولى فيها عمود فارغ إضافي بين "الكلي"
+#     و"اسم رب الأسرة" غير موجود بالورقتين التاليتين، واللتين بلا صف عناوين
+#     إطلاقاً (استمرار مباشر للبيانات). الاستخراج بخريطة أعمدة واحدة موروثة
+#     من الورقة الأولى فقط كان يُدخل رقم البطاقة القديم في عمود الاسم، ويُدخل
+#     المحجوب في عمود المستحق، على طول 97% من الملف. _extract_records_multi_sheet
+#     يجب أن يكتشف هذا الانزلاق وتصحيحه تلقائياً لكل ورقة على حدة.
+# ---------------------------------------------------------------------------
+def test_multi_sheet_column_drift_between_continuation_sheets():
+    sheet1 = [
+        ["المحجوب", "المستحق", "الكلي", "", "اسم رب الاسرة", "رقم البطاقة القديم", "رقم البطاقة", "ت"],
+        ["0", "5", "5", "", "احمد كريم عبد الساده", "2490", "1207482", "1"],
+        ["0", "2", "2", "", "عبد الحسين محمد عبد", "3021", "1469559", "2"],
+    ]
+    # ورقة استمرار: نفس الترتيب لكن بلا عمود فارغ، وبلا صف عناوين إطلاقاً
+    sheet2 = [
+        ["0", "4", "4", "فاطمه جميل خليفه", "71731", "1308529", "37"],
+        ["0", "1", "1", "فهيمه دري فشلان", "71732", "1282666", "38"],
+    ]
+    all_records = app._extract_records_multi_sheet([sheet1, sheet2], "رقم البطاقة القديم", "الاسم الثلاثي فقط")
+    check("multi_sheet_drift: total records from both sheets", len(all_records) == 4, detail=str(all_records))
+    if len(all_records) == 4:
+        r = all_records[2]
+        check("multi_sheet_drift: sheet2 name extracted as real Arabic name, not a card number",
+              r["اسم رب الأسرة"] == "فاطمه جميل خليفه", detail=str(r))
+        check("multi_sheet_drift: sheet2 الكلي correct", r["الكلي"] == 4, detail=str(r))
+        check("multi_sheet_drift: sheet2 مستحق correct (not leaked from محجوب)", r["مستحق"] == 4, detail=str(r))
+        check("multi_sheet_drift: sheet2 محجوب correct", r["محجوب"] == 0, detail=str(r))
+        check("multi_sheet_drift: sheet2 old card number correct", r["رقم البطاقة"] == "71731", detail=str(r))
+
 
 # ---------------------------------------------------------------------------
 # 1ب) عناوين أعمدة طويلة واقعية (أطول من 30 حرفاً) يجب ألا تُرفَض كترويسة —
@@ -601,6 +632,7 @@ def test_name_with_tracked_change_space_not_merged_end_to_end():
 def main():
     tests = [
         test_real_world_layout_with_blank_column,
+        test_multi_sheet_column_drift_between_continuation_sheets,
         test_long_realistic_header_labels_not_rejected,
         test_multi_cell_note_not_mistaken_for_header,
         test_total_column_synonym_majmoo,
