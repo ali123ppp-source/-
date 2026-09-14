@@ -13,6 +13,9 @@ import os
 import base64
 from functools import lru_cache
 from datetime import datetime
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
 
 # تم تعديل الاستثناء هنا ليتجاهل خطأ OSError تماماً بدلاً من توقف التطبيق
 try:
@@ -2754,6 +2757,289 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
     return html_doc, page_size, page_orientation, headers
 
 
+def _xl_val(v):
+    """يحوّل قيماً غير قياسية (مثل numpy.int64) لقيمة يقبلها openpyxl مباشرة."""
+    if isinstance(v, (int, float, str)) or v is None:
+        return v
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return str(v)
+
+
+def _xl_parse_css(style):
+    """يحلّل نص CSS المستخدم بنسخة PDF (خلفية/لون نص/عريض/محاذاة) لتطبيق نفس
+    التنسيق بخلايا إكسل — بأخذ آخر تطابق لكل خاصية (يحاكي أسبقية CSS)."""
+    bg_matches = re.findall(r'background-color:\s*#([0-9A-Fa-f]{6})', style)
+    fg_matches = re.findall(r'(?<!background-)color:\s*#([0-9A-Fa-f]{6})', style)
+    align_matches = re.findall(r'text-align:\s*(right|left|center)', style)
+    bold = "font-weight: bold" in style
+    return (
+        bg_matches[-1].upper() if bg_matches else None,
+        fg_matches[-1].upper() if fg_matches else None,
+        bold,
+        align_matches[-1] if align_matches else None,
+    )
+
+
+def build_excel_report(df, filename_base, card_choice, template_choice, sort_alphabetically=True, agent_metadata=None):
+    """يبني ملف إكسل (xlsx) لنفس القالب المختار، بنفس ترتيب الصفوف (تجميع أبجدي
+    بشرائط الحروف الملوّنة) ونفس تلوين الخلايا (كلي/مستحق/محجوب/اطفال، تظليل
+    صفوف مستحق=صفر) المستخدم بنسخة PDF لهذا القالب بالضبط — يُعيد هنا حساب
+    نفس ترويسة وقيم/تنسيق كل قالب الموجودة أعلى بدالة _build_report_html_doc
+    حتى تتطابق النتيجتان تماماً بلا أي فرق."""
+    is_green_theme = template_choice == "النموذج الحادي عشر (ثيم أخضر: ت، الاسم، المستحق، حقل فارغ)"
+    is_combined = card_choice == "القديم والحديث"
+    card_cols = ["القديم", "الحديث"] if is_combined else [card_choice]
+    show_children = "اطفال" in df.columns
+
+    if template_choice == "النموذج الأول (الأصلي المطور)":
+        headers = ["ت"] + card_cols + ["اسم رب الأسرة", "حقل فارغ", "الكلي", "مستحق", "محجوب", "ملاحظات"] if is_combined else ["ت", "اسم رب الأسرة", "حقل فارغ", "الكلي", "مستحق", "محجوب", card_choice, "ملاحظات"]
+    elif template_choice == "النموذج الثاني (حجم 14 وحقلين فارغين)":
+        headers = ["ت"] + card_cols + ["اسم رب الأسرة", "حقل فارغ 1", "حقل فارغ 2", "الكلي", "مستحق", "محجوب", "ملاحظات"] if is_combined else ["ت", "اسم رب الأسرة", "حقل فارغ 1", "حقل فارغ 2", "الكلي", "مستحق", "محجوب", card_choice, "ملاحظات"]
+    elif template_choice == "النموذج الثالث (خط 16، عناوين 12، 4 أشهر)":
+        headers = ["ت"] + card_cols + ["اسم رب الأسرة", "الكلي", "مستحق", "محجوب", "الشهر الأول", "الشهر الثاني", "الشهر الثالث", "الشهر الرابع"] if is_combined else ["ت", "اسم رب الأسرة", card_choice, "الكلي", "مستحق", "محجوب", "الشهر الأول", "الشهر الثاني", "الشهر الثالث", "الشهر الرابع"]
+    elif template_choice == "النموذج الرابع (12 سلة، العدد الكلي)":
+        headers = (["ت"] + card_cols + ["اسم المواطن", "العدد الكلي"] if is_combined else ["ت", card_choice, "اسم المواطن", "العدد الكلي"]) + [f"سلة {i}" for i in range(1, 13)]
+    elif template_choice == "النموذج السادس (12 سلة، العدد المستحق)":
+        headers = (["ت"] + card_cols + ["اسم المواطن", "العدد المستحق"] if is_combined else ["ت", card_choice, "اسم المواطن", "العدد المستحق"]) + [f"سلة {i}" for i in range(1, 13)]
+    elif template_choice == "النموذج الثامن (8 سلات، العدد المستحق)":
+        headers = (["ت"] + card_cols + ["اسم المواطن", "العدد المستحق"] if is_combined else ["ت", card_choice, "اسم المواطن", "العدد المستحق"]) + [f"سلة {i}" for i in range(1, 9)]
+    elif template_choice == "النموذج السابع (تفصيل المواد الغذائية)":
+        headers = ["ت"] + card_cols + ["اسم رب الأسرة", "الكلي", "المستحق", "المحجوب", "سكر", "زيت", "تمن", "معجون", "فاصوليا", "عدس", "حمص"] if is_combined else ["ت", "اسم رب الأسرة", card_choice, "الكلي", "المستحق", "المحجوب", "سكر", "زيت", "تمن", "معجون", "فاصوليا", "عدس", "حمص"]
+    elif template_choice == "النموذج التاسع (توزيع مواد غذائية، بدون رقم بطاقة)":
+        headers = ["ت", "اسم رب الأسرة", "مستحق", "طحين", "سكر", "زيت", "رز", "معجون", "باقوليات", "التاريخ"]
+    elif template_choice == "النموذج العاشر (ت، الاسم الرباعي، العدد المستحق، حقل فارغ)":
+        headers = ["ت", "الاسم الرباعي", "العدد المستحق", "حقل فارغ"]
+    elif template_choice == "النموذج الحادي عشر (ثيم أخضر: ت، الاسم، المستحق، حقل فارغ)":
+        headers = ["ت", "الاسم", "المستحق", "حقل فارغ"]
+    else:
+        headers = ["ت", "اسم رب الأسرة", "عدد الأفراد المستحقة", "حقل كبير فارغ", "حقل كبير فارغ"]
+
+    kuli_insert_idx = headers.index("الكلي") + 1 if (show_children and "الكلي" in headers) else None
+    if kuli_insert_idx is not None:
+        headers.insert(kuli_insert_idx, "اطفال")
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "الكشف"
+    ws.sheet_view.rightToLeft = True
+
+    thin = Side(style="thin", color="C3D0E3")
+    cell_border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    def header_colors(h):
+        if is_green_theme:
+            return "43A047", "FFFFFF"
+        if h == "اطفال":
+            return "FDEBD0", "B9770E"
+        if "كلي" in h:
+            return "D6E9FA", "1F618D"
+        if "مستحق" in h:
+            return "D3F3E8", "117864"
+        if "محجوب" in h:
+            return "FBD9D3", "C0392B"
+        return "EAF0F8", "1B3A63"
+
+    for col_idx, h in enumerate(headers, start=1):
+        bg, fg = header_colors(h)
+        cell = ws.cell(row=1, column=col_idx, value=h)
+        cell.font = Font(name="Calibri", bold=True, size=12, color=fg)
+        cell.fill = PatternFill("solid", fgColor=bg)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = cell_border
+    ws.row_dimensions[1].height = 26
+    ws.freeze_panes = "A2"
+
+    excel_row = 2
+    prev_letter = None
+    current_letter_color = "D4E6F1"
+    for idx, row in df.iterrows():
+        if sort_alphabetically:
+            letter = get_name_group_letter(row["اسم رب الأسرة"])
+            if letter != prev_letter:
+                current_letter_color = get_letter_banner_color(letter)
+                base_color = get_letter_base_color(letter)
+                ws.merge_cells(start_row=excel_row, start_column=1, end_row=excel_row, end_column=len(headers))
+                bc = ws.cell(row=excel_row, column=1, value=letter)
+                bc.font = Font(bold=True, size=14, color=base_color)
+                bc.fill = PatternFill("solid", fgColor=current_letter_color)
+                bc.alignment = Alignment(horizontal="center", vertical="center")
+                ws.row_dimensions[excel_row].height = 22
+                excel_row += 1
+                prev_letter = letter
+
+        is_eligible_zero = int(row["مستحق"]) == 0
+        row_bg = "background-color: #EC7063;" if is_eligible_zero else ""
+        ter_bg = f"background-color: #{current_letter_color};" if not is_eligible_zero else ""
+
+        display_name = row["اسم رب الأسرة"]
+        card_vals = [(row["رقم البطاقة القديم"], ""), (row["رقم البطاقة الحديث"], "")] if is_combined else [(row["رقم البطاقة"], "")]
+
+        if template_choice == "النموذج الأول (الأصلي المطور)":
+            if is_combined:
+                vals = [
+                    (row["ت"], ter_bg), *card_vals,
+                    (display_name, "text-align: right; font-weight: bold;"),
+                    ("x" if is_eligible_zero else "", ""),
+                    (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
+                    (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
+                    (row["محجوب"], "background-color: #FADBD8;" if not is_eligible_zero else ""),
+                    ("محجوب" if is_eligible_zero else "", "color: #CB4335; font-weight: bold;" if is_eligible_zero else "")
+                ]
+            else:
+                vals = [
+                    (row["ت"], ter_bg),
+                    (display_name, "text-align: right; font-weight: bold;"),
+                    ("x" if is_eligible_zero else "", ""),
+                    (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
+                    (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
+                    (row["محجوب"], "background-color: #FADBD8;" if not is_eligible_zero else ""),
+                    *card_vals,
+                    ("محجوب" if is_eligible_zero else "", "color: #CB4335; font-weight: bold;" if is_eligible_zero else "")
+                ]
+        elif template_choice == "النموذج الثاني (حجم 14 وحقلين فارغين)":
+            if is_combined:
+                vals = [
+                    (row["ت"], ter_bg), *card_vals,
+                    (display_name, "text-align: right; font-weight: bold;"),
+                    ("x" if is_eligible_zero else "", ""), ("x" if is_eligible_zero else "", ""),
+                    (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
+                    (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
+                    (row["محجوب"], "background-color: #E5E7E9;" if not is_eligible_zero else ""),
+                    ("محجوب" if is_eligible_zero else "", "color: #CB4335; font-weight: bold;" if is_eligible_zero else "")
+                ]
+            else:
+                vals = [
+                    (row["ت"], ter_bg),
+                    (display_name, "text-align: right; font-weight: bold;"),
+                    ("x" if is_eligible_zero else "", ""), ("x" if is_eligible_zero else "", ""),
+                    (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
+                    (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
+                    (row["محجوب"], "background-color: #E5E7E9;" if not is_eligible_zero else ""),
+                    *card_vals,
+                    ("محجوب" if is_eligible_zero else "", "color: #CB4335; font-weight: bold;" if is_eligible_zero else "")
+                ]
+        elif template_choice == "النموذج الثالث (خط 16، عناوين 12، 4 أشهر)":
+            if is_combined:
+                vals = [
+                    (row["ت"], ter_bg), *card_vals,
+                    (display_name, "text-align: right; font-weight: bold;"),
+                    (row["الكلي"], "background-color: #E5E7E9;" if not is_eligible_zero else ""),
+                    (row["مستحق"], ""),
+                    (row["محجوب"], "background-color: #FCF3CF;" if not is_eligible_zero else ""),
+                    ("", ""), ("", ""), ("", ""), ("", "")
+                ]
+            else:
+                vals = [
+                    (row["ت"], ter_bg),
+                    (display_name, "text-align: right; font-weight: bold;"),
+                    *card_vals,
+                    (row["الكلي"], "background-color: #E5E7E9;" if not is_eligible_zero else ""),
+                    (row["مستحق"], ""),
+                    (row["محجوب"], "background-color: #FCF3CF;" if not is_eligible_zero else ""),
+                    ("", ""), ("", ""), ("", ""), ("", "")
+                ]
+        elif template_choice == "النموذج الرابع (12 سلة، العدد الكلي)":
+            vals = [
+                (row["ت"], ter_bg), *card_vals,
+                (display_name, "text-align: right; font-weight: bold;"),
+                (row["الكلي"], "background-color: #E8F8F5;" if not is_eligible_zero else "")
+            ] + [("", "")] * 12
+        elif template_choice == "النموذج السادس (12 سلة، العدد المستحق)":
+            vals = [
+                (row["ت"], ter_bg), *card_vals,
+                (display_name, "text-align: right; font-weight: bold;"),
+                (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else "")
+            ] + [("", "")] * 12
+        elif template_choice == "النموذج الثامن (8 سلات، العدد المستحق)":
+            vals = [
+                (row["ت"], ter_bg), *card_vals,
+                (display_name, "text-align: right; font-weight: bold;"),
+                (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else "")
+            ] + [("", "")] * 8
+        elif template_choice == "النموذج السابع (تفصيل المواد الغذائية)":
+            if is_combined:
+                vals = [
+                    (row["ت"], ter_bg), *card_vals,
+                    (display_name, "text-align: right; font-weight: bold;"),
+                    (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
+                    (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
+                    (row["محجوب"], "background-color: #FADBD8;" if not is_eligible_zero else ""),
+                    ("", ""), ("", ""), ("", ""), ("", ""), ("", ""), ("", ""), ("", "")
+                ]
+            else:
+                vals = [
+                    (row["ت"], ter_bg),
+                    (display_name, "text-align: right; font-weight: bold;"),
+                    *card_vals,
+                    (row["الكلي"], "background-color: #EBF5FB;" if not is_eligible_zero else ""),
+                    (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
+                    (row["محجوب"], "background-color: #FADBD8;" if not is_eligible_zero else ""),
+                    ("", ""), ("", ""), ("", ""), ("", ""), ("", ""), ("", ""), ("", "")
+                ]
+        elif template_choice == "النموذج التاسع (توزيع مواد غذائية، بدون رقم بطاقة)":
+            vals = [
+                (row["ت"], ter_bg),
+                (display_name, "text-align: right; font-weight: bold;"),
+                (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else "")
+            ] + [("", "")] * 7
+        elif template_choice == "النموذج العاشر (ت، الاسم الرباعي، العدد المستحق، حقل فارغ)":
+            vals = [
+                (row["ت"], ter_bg),
+                (display_name, "text-align: right; font-weight: bold;"),
+                (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
+                ("", "")
+            ]
+        elif template_choice == "النموذج الحادي عشر (ثيم أخضر: ت، الاسم، المستحق، حقل فارغ)":
+            vals = [
+                (row["ت"], ter_bg),
+                (display_name, "text-align: right; font-weight: bold;"),
+                (row["مستحق"], ""),
+                ("", "")
+            ]
+        else:
+            vals = [
+                (row["ت"], ter_bg),
+                (display_name, "text-align: right; font-weight: bold; " + ("color: #FF0000;" if is_eligible_zero else "color: #0070C0;")),
+                ("x" if is_eligible_zero else row["مستحق"], ""),
+                ("XXXXXXXXXXXX" if is_eligible_zero else "", ""),
+                ("XXXXXXXXXXXX" if is_eligible_zero else "", "")
+            ]
+
+        if kuli_insert_idx is not None:
+            children_val = int(row["اطفال"])
+            children_style = "background-color: #FDEBD0; color: #B9770E; font-weight: bold;" if children_val > 0 and not is_eligible_zero else ("background-color: #FDEBD0;" if not is_eligible_zero else "")
+            vals.insert(kuli_insert_idx, (children_val, children_style))
+
+        for col_idx, (val, style) in enumerate(vals, start=1):
+            combined_style = f"{row_bg} {style}"
+            bg, fg, bold, align = _xl_parse_css(combined_style)
+            cell = ws.cell(row=excel_row, column=col_idx, value=_xl_val(val))
+            cell.border = cell_border
+            cell.alignment = Alignment(horizontal=align or "center", vertical="center")
+            if bg:
+                cell.fill = PatternFill("solid", fgColor=bg)
+            if fg or bold:
+                cell.font = Font(bold=bold, color=fg or "000000")
+        excel_row += 1
+
+    compact_headers = {"الكلي", "مستحق", "المستحق", "العدد المستحق", "محجوب", "المحجوب", "اطفال", "ت"}
+    for col_idx, h in enumerate(headers, start=1):
+        col_letter = get_column_letter(col_idx)
+        if "اسم" in h:
+            ws.column_dimensions[col_letter].width = 26
+        elif h in compact_headers:
+            ws.column_dimensions[col_letter].width = 10
+        else:
+            ws.column_dimensions[col_letter].width = max(12, len(h) + 4)
+
+    buffer = BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return buffer
+
+
 def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alphabetically=True, agent_metadata=None):
     html_doc, page_size, page_orientation, _headers = _build_report_html_doc(
         df, filename_base, card_choice, template_choice, sort_alphabetically, agent_metadata
@@ -2976,7 +3262,7 @@ if st.session_state.processing_done:
         with st.spinner(f'جاري صياغة وهيكلة مستندات Word و PDF لملف "{output_filename}"...'):
             word_output = build_word_for_template(df_final, output_filename, used_card_type, used_template, used_sort_alphabetically)
 
-        dl_col1, dl_col2 = st.columns(2)
+        dl_col1, dl_col2, dl_col3 = st.columns(3)
 
         with dl_col1:
             st.download_button(
@@ -3002,3 +3288,16 @@ if st.session_state.processing_done:
                     st.error(f"حدث خطأ أثناء إعداد PDF لملف \"{output_filename}\": {e}")
             else:
                 st.warning("⚠️ يرجى تثبيت مكتبة `pdfkit` أو `weasyprint` لتفعيل خاصية تحميل PDF.")
+
+        with dl_col3:
+            try:
+                excel_output = build_excel_report(df_final, output_filename, used_card_type, used_template, used_sort_alphabetically, agent_metadata)
+                st.download_button(
+                    label="📊 تحميل الكشف المنسق (Excel)",
+                    data=excel_output,
+                    file_name=f"كشف_منسق_جاهز_{output_filename}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"excel_dl_{idx}",
+                )
+            except Exception as e:
+                st.error(f"حدث خطأ أثناء إعداد Excel لملف \"{output_filename}\": {e}")
