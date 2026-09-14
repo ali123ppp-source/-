@@ -1847,6 +1847,81 @@ def build_professional_word_report_v11(df, filename_base, card_choice, sort_alph
 
     return save_doc_buffer(doc, df)
 
+# النموذج الثاني عشر: نفس ترتيب أعمدة النموذج العاشر (ت/الاسم/المستحق/حقل
+# فارغ كبير للملاحظات اليدوية) — طلب صريح بناءً على صورة كشف ورقي مرجعي —
+# لكن بهوية النظام الملوّنة المعتادة (رأس كحلي، شرائط حروف، تظليل أحمر كامل
+# للصف عند مستحق=صفر) بدل الشكل الأبيض والأسود البسيط بالصورة المرجعية.
+def build_professional_word_report_v12(df, filename_base, card_choice, sort_alphabetically=True, visible_totals=None):
+    doc = Document()
+    setup_document_layout(doc, filename_base)
+
+    clean_name = filename_base
+    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج", "الترتيب", "الأبجدي", "الابجدي", "أبجدي", "ابجدي"]: clean_name = clean_name.replace(w, " ")
+    clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', ' ', clean_name).split())
+
+    title_p = doc.add_paragraph()
+    title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    title_run = title_p.add_run(f"الكشف الإحصائي المنسق للوكيل: {clean_name}")
+    title_run.font.name, title_run.font.size, title_run.bold = "Segoe UI Semibold", Pt(14), True
+
+    dynamic_name_width = Cm(max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15) * 0.22 + 0.5)
+    orig_headers = ["ت", "اسم رب الأسرة", "المستحق", "حقل فارغ"]
+    col_widths = [Cm(1.2), dynamic_name_width, Cm(2.4), Cm(6.5)]
+    COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
+    hidden_orig_indices = {i for i, h in enumerate(orig_headers) if h in _hidden_total_labels(visible_totals)}
+    keep_indices = [i for i in range(len(orig_headers)) if i not in hidden_orig_indices]
+    headers = [orig_headers[i] for i in keep_indices]
+
+    table = doc.add_table(rows=1, cols=len(headers))
+    table.style, table.alignment = 'Table Grid', WD_TABLE_ALIGNMENT.CENTER
+    set_table_borders(table, color_hex="2A4B7C")
+    table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
+    table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
+    table.rows[0].height = Pt(50.4)
+
+    hdr_cells = table.rows[0].cells
+    for target_col, i in enumerate(keep_indices):
+        title = orig_headers[i]
+        cell = hdr_cells[target_col]
+        cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
+        format_cell_advanced(cell, title, bold=True, size_pt=14, font_name="Segoe UI Semibold", align="center", color_rgb=COLOR_NAVY_BLUE)
+        if title == "المستحق":
+            set_cell_background(cell, "DAEEF3")
+
+    prev_letter = None
+    current_letter_color = "D4E6F1"
+    for idx, row in df.iterrows():
+        if sort_alphabetically:
+            letter = get_name_group_letter(row["اسم رب الأسرة"])
+            if letter != prev_letter:
+                current_letter_color = add_letter_banner_row(table, letter)
+                prev_letter = letter
+
+        new_row = table.add_row()
+        new_row.height = Pt(30)
+        row_cells = new_row.cells
+        new_row._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
+        is_eligible_zero = int(row["مستحق"]) == 0
+
+        for target_col, i in enumerate(keep_indices):
+            cell = row_cells[target_col]
+            cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
+            if i == 0:
+                format_cell_advanced(cell, row["ت"], size_pt=14, font_name="Calibri", align="center")
+                set_cell_background(cell, "EC7063" if is_eligible_zero else current_letter_color)
+            elif i == 1:
+                set_cell_no_wrap(cell)
+                format_cell_advanced(cell, row["اسم رب الأسرة"], size_pt=16, font_name="Calibri", align="right")
+                if is_eligible_zero: set_cell_background(cell, "EC7063")
+            elif i == 2:
+                format_cell_advanced(cell, row["مستحق"], size_pt=14, font_name="Calibri", align="center")
+                set_cell_background(cell, "EC7063" if is_eligible_zero else "E8F8F5")
+            else:
+                format_cell_advanced(cell, "x" if is_eligible_zero else "", size_pt=14, font_name="Calibri", align="center")
+                if is_eligible_zero: set_cell_background(cell, "EC7063")
+
+    return save_doc_buffer(doc, df)
+
 # --- الدالة الجديدة للنموذج السابع (تفاصيل المواد) ---
 def build_professional_word_report_v7(df, filename_base, card_choice, sort_alphabetically=True, visible_totals=None):
     doc = Document()
@@ -2188,6 +2263,10 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
         headers = ["ت", "الاسم", "المستحق", "حقل فارغ"]
         page_size = "A4"
         page_orientation = "portrait"
+    elif template_choice == "النموذج الثاني عشر (ت، اسم رب الأسرة، المستحق، حقل فارغ)":
+        headers = ["ت", "اسم رب الأسرة", "المستحق", "حقل فارغ"]
+        page_size = "A4"
+        page_orientation = "portrait"
     else:
         headers = ["ت", "اسم رب الأسرة", "عدد الأفراد المستحقة", "حقل كبير فارغ", "حقل كبير فارغ"]
         page_size = "A3"
@@ -2364,6 +2443,13 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
                 (display_name, "text-align: right; font-weight: bold; font-size: 14pt;"),
                 (row["مستحق"], ""),
                 ('<span class="green-checkbox"></span>', "")
+            ]
+        elif template_choice == "النموذج الثاني عشر (ت، اسم رب الأسرة، المستحق، حقل فارغ)":
+            vals = [
+                (row["ت"], ter_bg),
+                (display_name, "text-align: right; font-weight: bold; font-size: 14pt;"),
+                (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
+                ("x" if is_eligible_zero else "", "")
             ]
         else:
             vals = [
@@ -2909,6 +2995,8 @@ def build_excel_report(df, filename_base, card_choice, template_choice, sort_alp
         headers = ["ت", "الاسم الرباعي", "العدد المستحق", "حقل فارغ"]
     elif template_choice == "النموذج الحادي عشر (ثيم أخضر: ت، الاسم، المستحق، حقل فارغ)":
         headers = ["ت", "الاسم", "المستحق", "حقل فارغ"]
+    elif template_choice == "النموذج الثاني عشر (ت، اسم رب الأسرة، المستحق، حقل فارغ)":
+        headers = ["ت", "اسم رب الأسرة", "المستحق", "حقل فارغ"]
     else:
         headers = ["ت", "اسم رب الأسرة", "عدد الأفراد المستحقة", "حقل كبير فارغ", "حقل كبير فارغ"]
 
@@ -3098,6 +3186,13 @@ def build_excel_report(df, filename_base, card_choice, template_choice, sort_alp
                 (row["مستحق"], ""),
                 ("", "")
             ]
+        elif template_choice == "النموذج الثاني عشر (ت، اسم رب الأسرة، المستحق، حقل فارغ)":
+            vals = [
+                (row["ت"], ter_bg),
+                (display_name, "text-align: right; font-weight: bold;"),
+                (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
+                ("x" if is_eligible_zero else "", "")
+            ]
         else:
             vals = [
                 (row["ت"], ter_bg),
@@ -3218,7 +3313,8 @@ with col3:
             "النموذج الثامن (8 سلات، العدد المستحق)",
             "النموذج التاسع (توزيع مواد غذائية، بدون رقم بطاقة)",
             "النموذج العاشر (ت، الاسم الرباعي، العدد المستحق، حقل فارغ)",
-            "النموذج الحادي عشر (ثيم أخضر: ت، الاسم، المستحق، حقل فارغ)"
+            "النموذج الحادي عشر (ثيم أخضر: ت، الاسم، المستحق، حقل فارغ)",
+            "النموذج الثاني عشر (ت، اسم رب الأسرة، المستحق، حقل فارغ)"
         ],
         index=0,
         horizontal=False
@@ -3368,6 +3464,8 @@ if st.session_state.processing_done:
             return build_professional_word_report_v10(df_final, output_filename, used_card_type, used_sort_alphabetically, used_visible_totals)
         elif used_template == "النموذج الحادي عشر (ثيم أخضر: ت، الاسم، المستحق، حقل فارغ)":
             return build_professional_word_report_v11(df_final, output_filename, used_card_type, used_sort_alphabetically, used_visible_totals)
+        elif used_template == "النموذج الثاني عشر (ت، اسم رب الأسرة، المستحق، حقل فارغ)":
+            return build_professional_word_report_v12(df_final, output_filename, used_card_type, used_sort_alphabetically, used_visible_totals)
         else:
             return build_professional_word_report_v5(df_final, output_filename, used_card_type, used_sort_alphabetically, used_visible_totals)
 
