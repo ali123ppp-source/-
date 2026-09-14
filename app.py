@@ -680,7 +680,7 @@ def _extract_full_oxml_text(oxml_element):
 # -----------------------------------------------------------------------------
 # محرك قراءة وتنظيف البيانات المطور
 # -----------------------------------------------------------------------------
-def extract_and_clean_data(file_obj, card_choice, name_length_choice, sort_alphabetically=True, sort_by_card_within_group=False):
+def extract_and_clean_data(file_obj, card_choice, name_length_choice, sort_alphabetically=True, sort_by_card_within_group=False, sort_by_card_only=False):
     raw_records = []
     rows_data = []
     # مصدر منفصل تماماً لاستخراج بيانات الوكيل (مركز/رقم وكالة/اسم) — لا يُمرَّر
@@ -739,7 +739,9 @@ def extract_and_clean_data(file_obj, card_choice, name_length_choice, sort_alpha
         warnings = _validate_extracted_records(header_records)
         df = pd.DataFrame(header_records)
         if not df.empty:
-            if sort_alphabetically:
+            if sort_by_card_only:
+                df = df.sort_values(by="_old_card_sort").reset_index(drop=True)
+            elif sort_alphabetically:
                 if sort_by_card_within_group:
                     df["_grp_letter"] = df["اسم رب الأسرة"].apply(get_name_group_letter)
                     df = df.sort_values(by=["_grp_letter", "_old_card_sort"]).reset_index(drop=True)
@@ -805,7 +807,9 @@ def extract_and_clean_data(file_obj, card_choice, name_length_choice, sort_alpha
     warnings = _validate_extracted_records(raw_records)
     df = pd.DataFrame(raw_records)
     if not df.empty:
-        if sort_alphabetically:
+        if sort_by_card_only:
+            df = df.sort_values(by="_old_card_sort").reset_index(drop=True)
+        elif sort_alphabetically:
             if sort_by_card_within_group:
                 df["_grp_letter"] = df["اسم رب الأسرة"].apply(get_name_group_letter)
                 df = df.sort_values(by=["_grp_letter", "_old_card_sort"]).reset_index(drop=True)
@@ -3459,14 +3463,16 @@ with col3:
 
 SORT_KEEP_ORIGINAL = "الحفاظ على ترتيب الملف الأصلي (بدون ترتيب أبجدي)"
 SORT_ALPHA_WITH_OLD_CARD = "ترتيب أبجدي بحسب الاسم مع رقم البطاقة القديم تصاعدياً داخل كل حرف"
+SORT_CARD_ONLY = "ترتيب تصاعدي حسب رقم البطاقة القديم فقط (من الأصغر إلى الأكبر)"
 
 sort_choice = st.radio(
     "🔤 ترتيب بيانات الجدول:",
-    ["ترتيب أبجدي بحسب الاسم", SORT_ALPHA_WITH_OLD_CARD, SORT_KEEP_ORIGINAL],
+    ["ترتيب أبجدي بحسب الاسم", SORT_ALPHA_WITH_OLD_CARD, SORT_CARD_ONLY, SORT_KEEP_ORIGINAL],
     index=0,
     horizontal=True
 )
-sort_alphabetically = (sort_choice != SORT_KEEP_ORIGINAL)
+sort_by_card_only = (sort_choice == SORT_CARD_ONLY)
+sort_alphabetically = (sort_choice != SORT_KEEP_ORIGINAL) and not sort_by_card_only
 sort_by_card_within_group = (sort_choice == SORT_ALPHA_WITH_OLD_CARD)
 
 show_children_filter = st.checkbox(
@@ -3512,7 +3518,7 @@ if st.button("⚙️ تشغيل محرك التنظيم والتنسيق الم�
                 extracted = []
                 file_warnings = {}
                 for f in uploaded_files:
-                    df_res, extraction_warnings, agent_metadata = extract_and_clean_data(f, selected_card, name_length_choice, sort_alphabetically, sort_by_card_within_group)
+                    df_res, extraction_warnings, agent_metadata = extract_and_clean_data(f, selected_card, name_length_choice, sort_alphabetically, sort_by_card_within_group, sort_by_card_only)
                     if not df_res.empty:
                         extracted.append({"filename": f.name.rsplit('.', 1)[0], "df": df_res, "metadata": agent_metadata})
                         log_processed_file(f.name, len(df_res), selected_card, name_length_choice, template_choice, sort_choice)
@@ -3522,7 +3528,9 @@ if st.button("⚙️ تشغيل محرك التنظيم والتنسيق الم�
                 if extracted:
                     if merge_files:
                         merged_df = pd.concat([e["df"] for e in extracted], ignore_index=True)
-                        if sort_alphabetically:
+                        if sort_by_card_only:
+                            merged_df = merged_df.sort_values(by="_old_card_sort").reset_index(drop=True)
+                        elif sort_alphabetically:
                             if sort_by_card_within_group:
                                 merged_df["_grp_letter"] = merged_df["اسم رب الأسرة"].apply(get_name_group_letter)
                                 merged_df = merged_df.sort_values(by=["_grp_letter", "_old_card_sort"]).reset_index(drop=True)
@@ -3568,9 +3576,9 @@ if st.button("⚙️ تشغيل محرك التنظيم والتنسيق الم�
 if st.session_state.processing_done:
     used_card_type = st.session_state.selected_card
     used_template = st.session_state.template_choice
-    used_sort_alphabetically = (st.session_state.sort_choice != SORT_KEEP_ORIGINAL)
+    used_sort_alphabetically = st.session_state.sort_choice not in (SORT_KEEP_ORIGINAL, SORT_CARD_ONLY)
     used_visible_totals = st.session_state.visible_totals
-    order_note = "أبجدياً" if used_sort_alphabetically else "بترتيب الملف الأصلي"
+    order_note = "أبجدياً" if used_sort_alphabetically else ("تصاعدياً حسب رقم البطاقة القديم" if st.session_state.sort_choice == SORT_CARD_ONLY else "بترتيب الملف الأصلي")
     results = st.session_state.results
     mode_note = "تم دمج الملفات المرفوعة بملف واحد" if st.session_state.merge_choice == "دمج كل الملفات في ملف واحد وترتيبها" else f"تمت معالجة {len(results)} ملف بشكل منفصل"
 
