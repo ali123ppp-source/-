@@ -93,6 +93,7 @@ if "processing_done" not in st.session_state:
     st.session_state.sort_choice = ""
     st.session_state.merge_choice = ""
     st.session_state.show_children_filter = False
+    st.session_state.visible_totals = {"كلي", "مستحق", "محجوب"}
     st.session_state.extraction_warnings = {}
 
 # -----------------------------------------------------------------------------
@@ -263,6 +264,31 @@ def blend_color_with_white(hex_color, alpha=0.25):
 def get_letter_banner_color(letter):
     """لون هايلايت شفاف (25%) لكل حرف، يُستخدم لخلفية البانر وخانة الترقيم معاً."""
     return blend_color_with_white(get_letter_base_color(letter), 0.25)
+
+
+# فلتر "ماذا تريد أن يظهر داخل الملف؟": يسمح للمستخدم بإخفاء أي من أعمدة
+# الكلي/المستحق/المحجوب (فرداً أو أكثر) عن كل النماذج الـ11 دفعة واحدة.
+# كل نموذج يسمّي هذه الأعمدة بصيغة مختلفة قليلاً (مثلاً "العدد الكلي" أو
+# "عدد الأفراد المستحقة")، فهذا القاموس يربط كل تسمية فعلية بالفئة التي
+# تنتمي إليها، ليعمل الفلتر بشكل صحيح بصرف النظر عن اختلاف تسمية كل قالب.
+TOTALS_CATEGORY_LABELS = {
+    "كلي": ["الكلي", "العدد الكلي"],
+    "مستحق": ["مستحق", "المستحق", "العدد المستحق", "عدد الأفراد المستحقة"],
+    "محجوب": ["محجوب", "المحجوب"],
+}
+
+def _hidden_total_labels(visible_totals):
+    """يُرجع مجموعة كل التسميات الفعلية الواجب إخفاؤها بناءً على الفئات
+    المُختارة بـvisible_totals ({"كلي","مستحق","محجوب"} فئات مطلوب إظهارها).
+    visible_totals=None تعني: إظهار الكل (السلوك الافتراضي القديم)."""
+    if visible_totals is None:
+        return set()
+    hide = set()
+    for cat, labels in TOTALS_CATEGORY_LABELS.items():
+        if cat not in visible_totals:
+            hide.update(labels)
+    return hide
+
 
 def add_letter_banner_row(table, letter, height_inches=0.45):
     """يضيف صف بانر مدموج على كامل عرض الجدول بخلفية هايلايت شفافة (25%) ونص بلون الحرف الأساسي."""
@@ -655,7 +681,7 @@ def extract_and_clean_data(file_obj, card_choice, name_length_choice, sort_alpha
 # -----------------------------------------------------------------------------
 # دوال إنشاء النماذج (1 إلى 7) بصيغة Word
 # -----------------------------------------------------------------------------
-def build_professional_word_report(df, filename_base, card_choice, sort_alphabetically=True):
+def build_professional_word_report(df, filename_base, card_choice, sort_alphabetically=True, visible_totals=None):
     doc = Document()
     setup_document_layout(doc, filename_base)
 
@@ -682,7 +708,14 @@ def build_professional_word_report(df, filename_base, card_choice, sort_alphabet
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
     remaining_indices = ([1, 2, 3, 4, 5, 6, 8] if show_children else [1, 2, 3, 4, 5, 7]) if is_combined else None
 
-    headers = (["ت", "القديم", "الحديث"] + [orig_headers[i] for i in remaining_indices]) if is_combined else orig_headers
+    hidden_orig_indices = {i for i, h in enumerate(orig_headers) if h in _hidden_total_labels(visible_totals)}
+    keep_indices = None
+    if is_combined:
+        remaining_indices = [i for i in remaining_indices if i not in hidden_orig_indices]
+        headers = ["ت", "القديم", "الحديث"] + [orig_headers[i] for i in remaining_indices]
+    else:
+        keep_indices = [i for i in range(len(orig_headers)) if i not in hidden_orig_indices]
+        headers = [orig_headers[i] for i in keep_indices]
     table = doc.add_table(rows=1, cols=len(headers))
     table.style, table.alignment = 'Table Grid', WD_TABLE_ALIGNMENT.CENTER
     set_table_borders(table, color_hex="2A4B7C")
@@ -713,8 +746,9 @@ def build_professional_word_report(df, filename_base, card_choice, sort_alphabet
                 format_cell_advanced(cell, title, bold=True, size_pt=14, font_name="Segoe UI Semibold", align="left" if i==1 else "center", color_rgb=COLOR_NAVY_BLUE)
             j += 1
     else:
-        for i, title in enumerate(headers):
-            cell = table.rows[0].cells[i]
+        for target_col, i in enumerate(keep_indices):
+            title = orig_headers[i]
+            cell = table.rows[0].cells[target_col]
             cell.width = col_widths[i]
             cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
             if i in range(3, 6 + offset):
@@ -785,8 +819,8 @@ def build_professional_word_report(df, filename_base, card_choice, sort_alphabet
                 j += 1
         else:
             set_cell_no_wrap(row_cells[1])
-            for i in range(len(headers)):
-                cell = row_cells[i]
+            for target_col, i in enumerate(keep_indices):
+                cell = row_cells[target_col]
                 cell.width = col_widths[i]
                 cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                 val = _v1_cell_value(i)
@@ -805,7 +839,7 @@ def build_professional_word_report(df, filename_base, card_choice, sort_alphabet
                     elif i==5+offset: set_cell_background(cell, "FADBD8")
     return save_doc_buffer(doc, df)
 
-def build_professional_word_report_v2(df, filename_base, card_choice, sort_alphabetically=True):
+def build_professional_word_report_v2(df, filename_base, card_choice, sort_alphabetically=True, visible_totals=None):
     doc = Document()
     setup_document_layout(doc, filename_base)
     
@@ -829,7 +863,14 @@ def build_professional_word_report_v2(df, filename_base, card_choice, sort_alpha
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
     remaining_indices = ([1, 2, 3, 4, 5, 6, 7, 9] if show_children else [1, 2, 3, 4, 5, 6, 8]) if is_combined else None
 
-    headers = (["ت", "القديم", "الحديث"] + [orig_headers[i] for i in remaining_indices]) if is_combined else orig_headers
+    hidden_orig_indices = {i for i, h in enumerate(orig_headers) if h in _hidden_total_labels(visible_totals)}
+    keep_indices = None
+    if is_combined:
+        remaining_indices = [i for i in remaining_indices if i not in hidden_orig_indices]
+        headers = ["ت", "القديم", "الحديث"] + [orig_headers[i] for i in remaining_indices]
+    else:
+        keep_indices = [i for i in range(len(orig_headers)) if i not in hidden_orig_indices]
+        headers = [orig_headers[i] for i in keep_indices]
     table = doc.add_table(rows=1, cols=len(headers))
     table.style, table.alignment = 'Table Grid', WD_TABLE_ALIGNMENT.CENTER
     set_table_borders(table, "2A4B7C")
@@ -857,8 +898,9 @@ def build_professional_word_report_v2(df, filename_base, card_choice, sort_alpha
             format_cell_advanced(cell, title, bold=True, size_pt=14, font_name="Segoe UI Semibold", align="left" if i==1 else "center", color_rgb=COLOR_NAVY_BLUE)
             j += 1
     else:
-        for i, title in enumerate(headers):
-            cell = table.rows[0].cells[i]
+        for target_col, i in enumerate(keep_indices):
+            title = orig_headers[i]
+            cell = table.rows[0].cells[target_col]
             cell.width = col_widths[i]
             cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
             if i in range(4, 7 + offset): set_cell_vertical_text(cell)
@@ -926,8 +968,8 @@ def build_professional_word_report_v2(df, filename_base, card_choice, sort_alpha
                 j += 1
         else:
             set_cell_no_wrap(row_cells[1])
-            for i in range(len(headers)):
-                cell = row_cells[i]
+            for target_col, i in enumerate(keep_indices):
+                cell = row_cells[target_col]
                 cell.width = col_widths[i]
                 cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                 val = _v2_cell_value(i)
@@ -945,7 +987,7 @@ def build_professional_word_report_v2(df, filename_base, card_choice, sort_alpha
                 if i==6+offset: set_cell_background(cell, "E5E7E9")
     return save_doc_buffer(doc, df)
 
-def build_professional_word_report_v3(df, filename_base, card_choice, sort_alphabetically=True):
+def build_professional_word_report_v3(df, filename_base, card_choice, sort_alphabetically=True, visible_totals=None):
     doc = Document()
     setup_document_layout(doc, filename_base)
     
@@ -969,7 +1011,14 @@ def build_professional_word_report_v3(df, filename_base, card_choice, sort_alpha
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
     remaining_indices = ([1, 3, 4, 5, 6, 7, 8, 9, 10] if show_children else [1, 3, 4, 5, 6, 7, 8, 9]) if is_combined else None
 
-    headers = (["ت", "القديم", "الحديث"] + [orig_headers[i] for i in remaining_indices]) if is_combined else orig_headers
+    hidden_orig_indices = {i for i, h in enumerate(orig_headers) if h in _hidden_total_labels(visible_totals)}
+    keep_indices = None
+    if is_combined:
+        remaining_indices = [i for i in remaining_indices if i not in hidden_orig_indices]
+        headers = ["ت", "القديم", "الحديث"] + [orig_headers[i] for i in remaining_indices]
+    else:
+        keep_indices = [i for i in range(len(orig_headers)) if i not in hidden_orig_indices]
+        headers = [orig_headers[i] for i in keep_indices]
     table = doc.add_table(rows=1, cols=len(headers))
     table.style, table.alignment = 'Table Grid', WD_TABLE_ALIGNMENT.CENTER
     set_table_borders(table, color_hex="2A4B7C")
@@ -997,8 +1046,9 @@ def build_professional_word_report_v3(df, filename_base, card_choice, sort_alpha
             format_cell_advanced(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="left" if i == 1 else "center", color_rgb=COLOR_NAVY_BLUE)
             j += 1
     else:
-        for i, title in enumerate(headers):
-            cell = table.rows[0].cells[i]
+        for target_col, i in enumerate(keep_indices):
+            title = orig_headers[i]
+            cell = table.rows[0].cells[target_col]
             cell.width = col_widths[i]
             cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
             if i in range(3, 6 + offset): set_cell_vertical_text(cell)
@@ -1062,8 +1112,8 @@ def build_professional_word_report_v3(df, filename_base, card_choice, sort_alpha
                 j += 1
         else:
             set_cell_no_wrap(row_cells[1])
-            for i in range(len(headers)):
-                cell = row_cells[i]
+            for target_col, i in enumerate(keep_indices):
+                cell = row_cells[target_col]
                 cell.width = col_widths[i]
                 cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                 val = _v3_cell_value(i)
@@ -1080,7 +1130,7 @@ def build_professional_word_report_v3(df, filename_base, card_choice, sort_alpha
                 if i == 5 + offset: set_cell_background(cell, "FCF3CF")
     return save_doc_buffer(doc, df)
 
-def build_professional_word_report_v4(df, filename_base, card_choice, sort_alphabetically=True):
+def build_professional_word_report_v4(df, filename_base, card_choice, sort_alphabetically=True, visible_totals=None):
     doc = Document()
     setup_document_layout(doc, filename_base)
     
@@ -1098,7 +1148,14 @@ def build_professional_word_report_v4(df, filename_base, card_choice, sort_alpha
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
     remaining_indices = list(range(2, 16)) if is_combined else None
 
-    headers = (["ت", "القديم", "الحديث"] + [orig_headers[i] for i in remaining_indices]) if is_combined else orig_headers
+    hidden_orig_indices = {i for i, h in enumerate(orig_headers) if h in _hidden_total_labels(visible_totals)}
+    keep_indices = None
+    if is_combined:
+        remaining_indices = [i for i in remaining_indices if i not in hidden_orig_indices]
+        headers = ["ت", "القديم", "الحديث"] + [orig_headers[i] for i in remaining_indices]
+    else:
+        keep_indices = [i for i in range(len(orig_headers)) if i not in hidden_orig_indices]
+        headers = [orig_headers[i] for i in keep_indices]
     table = doc.add_table(rows=1, cols=len(headers))
     table.style, table.alignment = 'Table Grid', WD_TABLE_ALIGNMENT.CENTER
     set_table_borders(table, color_hex="2A4B7C")
@@ -1126,8 +1183,9 @@ def build_professional_word_report_v4(df, filename_base, card_choice, sort_alpha
             format_cell_advanced(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="left" if i == 2 else "center", color_rgb=COLOR_NAVY_BLUE)
             j += 1
     else:
-        for i, title in enumerate(headers):
-            cell = hdr_cells[i]
+        for target_col, i in enumerate(keep_indices):
+            title = orig_headers[i]
+            cell = hdr_cells[target_col]
             cell.width = col_widths[i]
             cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
             if i >= 3: set_cell_vertical_text(cell)
@@ -1180,8 +1238,8 @@ def build_professional_word_report_v4(df, filename_base, card_choice, sort_alpha
                 j += 1
         else:
             set_cell_no_wrap(row_cells[2])
-            for i in range(16):
-                cell = row_cells[i]
+            for target_col, i in enumerate(keep_indices):
+                cell = row_cells[target_col]
                 cell.width = col_widths[i]
                 cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                 val = row["ت"] if i == 0 else row["رقم البطاقة"] if i == 1 else row["اسم رب الأسرة"] if i == 2 else row["الكلي"] if i == 3 else ""
@@ -1196,7 +1254,7 @@ def build_professional_word_report_v4(df, filename_base, card_choice, sort_alpha
                     if i == 3: set_cell_background(cell, "E8F8F5")
     return save_doc_buffer(doc, df)
 
-def build_professional_word_report_v5(df, filename_base, card_choice, sort_alphabetically=True):
+def build_professional_word_report_v5(df, filename_base, card_choice, sort_alphabetically=True, visible_totals=None):
     doc = Document()
     setup_document_layout(doc, filename_base, is_a3=True)
         
@@ -1209,26 +1267,30 @@ def build_professional_word_report_v5(df, filename_base, card_choice, sort_alpha
     title_run = title_p.add_run(f"الكشف الإحصائي المنسق للوكيل: {clean_name}")
     title_run.font.name, title_run.font.size, title_run.bold = "Segoe UI Semibold", Pt(18), True
     
-    headers = ["ت", "اسم رب الأسرة", "عدد الأفراد المستحقة", "حقل كبير فارغ", "حقل كبير فارغ"]
-    table = doc.add_table(rows=1, cols=5)
+    orig_headers = ["ت", "اسم رب الأسرة", "عدد الأفراد المستحقة", "حقل كبير فارغ", "حقل كبير فارغ"]
+    hidden_orig_indices = {i for i, h in enumerate(orig_headers) if h in _hidden_total_labels(visible_totals)}
+    keep_indices = [i for i in range(len(orig_headers)) if i not in hidden_orig_indices]
+    headers = [orig_headers[i] for i in keep_indices]
+    table = doc.add_table(rows=1, cols=len(headers))
     table.style, table.alignment = 'Table Grid', WD_TABLE_ALIGNMENT.CENTER
     set_table_borders(table, color_hex="2A4B7C")
     table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
     table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
-    
+
     table.rows[0].height = Inches(0.75)
-    
+
     col_widths = [Cm(1.5), Cm(8.0), Cm(3.2), Cm(8.0), Cm(8.0)]
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
     COLOR_NAME_BLUE = RGBColor(0, 112, 192)
     COLOR_RED = RGBColor(255, 0, 0)
-    
-    for i, title in enumerate(headers):
-        cell = table.rows[0].cells[i]
+
+    for target_col, i in enumerate(keep_indices):
+        title = orig_headers[i]
+        cell = table.rows[0].cells[target_col]
         cell.width = col_widths[i]
         cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
         format_cell_advanced(cell, title, bold=True, size_pt=18, font_name="Microsoft Uighur", align="center", color_rgb=COLOR_NAVY_BLUE)
-            
+
     prev_letter = None
     current_letter_color = None
     for idx, row in df.iterrows():
@@ -1245,8 +1307,8 @@ def build_professional_word_report_v5(df, filename_base, card_choice, sort_alpha
         is_eligible_zero = int(row["مستحق"]) == 0
         set_cell_no_wrap(row_cells[1])
 
-        for i in range(5):
-            cell = row_cells[i]
+        for target_col, i in enumerate(keep_indices):
+            cell = row_cells[target_col]
             cell.width = col_widths[i]
             cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
             val = ""
@@ -1271,7 +1333,7 @@ def build_professional_word_report_v5(df, filename_base, card_choice, sort_alpha
 
     return save_doc_buffer(doc, df)
 
-def build_professional_word_report_v6(df, filename_base, card_choice, sort_alphabetically=True):
+def build_professional_word_report_v6(df, filename_base, card_choice, sort_alphabetically=True, visible_totals=None):
     doc = Document()
     setup_document_layout(doc, filename_base)
     
@@ -1291,7 +1353,14 @@ def build_professional_word_report_v6(df, filename_base, card_choice, sort_alpha
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
     remaining_indices = list(range(2, 16)) if is_combined else None
 
-    headers = (["ت", "القديم", "الحديث"] + [orig_headers[i] for i in remaining_indices]) if is_combined else orig_headers
+    hidden_orig_indices = {i for i, h in enumerate(orig_headers) if h in _hidden_total_labels(visible_totals)}
+    keep_indices = None
+    if is_combined:
+        remaining_indices = [i for i in remaining_indices if i not in hidden_orig_indices]
+        headers = ["ت", "القديم", "الحديث"] + [orig_headers[i] for i in remaining_indices]
+    else:
+        keep_indices = [i for i in range(len(orig_headers)) if i not in hidden_orig_indices]
+        headers = [orig_headers[i] for i in keep_indices]
     table = doc.add_table(rows=1, cols=len(headers))
     table.style, table.alignment = 'Table Grid', WD_TABLE_ALIGNMENT.CENTER
     set_table_borders(table, color_hex="2A4B7C")
@@ -1319,8 +1388,9 @@ def build_professional_word_report_v6(df, filename_base, card_choice, sort_alpha
             format_cell_advanced(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="left" if i == 2 else "center", color_rgb=COLOR_NAVY_BLUE)
             j += 1
     else:
-        for i, title in enumerate(headers):
-            cell = hdr_cells[i]
+        for target_col, i in enumerate(keep_indices):
+            title = orig_headers[i]
+            cell = hdr_cells[target_col]
             cell.width = col_widths[i]
             cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
             if i >= 3: set_cell_vertical_text(cell)
@@ -1373,8 +1443,8 @@ def build_professional_word_report_v6(df, filename_base, card_choice, sort_alpha
                 j += 1
         else:
             set_cell_no_wrap(row_cells[2])
-            for i in range(16):
-                cell = row_cells[i]
+            for target_col, i in enumerate(keep_indices):
+                cell = row_cells[target_col]
                 cell.width = col_widths[i]
                 cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
@@ -1396,7 +1466,7 @@ def build_professional_word_report_v6(df, filename_base, card_choice, sort_alpha
 
 # --- النموذج الثامن: مطابق للسادس (العدد المستحق) لكن بـ 8 سلات، وعناوين بلتفاف عادي
 # مع حساب عرض كل عمود رياضياً حسب أطول محتوى فيه (بدل عرض ثابت مخمّن) ---
-def build_professional_word_report_v8(df, filename_base, card_choice, sort_alphabetically=True):
+def build_professional_word_report_v8(df, filename_base, card_choice, sort_alphabetically=True, visible_totals=None):
     doc = Document()
     setup_document_layout(doc, filename_base)
 
@@ -1421,17 +1491,20 @@ def build_professional_word_report_v8(df, filename_base, card_choice, sort_alpha
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
 
     orig_headers = ["ت", card_choice, "اسم المواطن", "العدد المستحق"] + [f"سلة {i}" for i in range(1, 9)]
+    hidden_orig_indices = {i for i, h in enumerate(orig_headers) if h in _hidden_total_labels(visible_totals)}
+    keep_indices = None
     if is_combined:
         old_card_width = dynamic_col_width(df["رقم البطاقة القديم"])
         new_card_width = dynamic_col_width(df["رقم البطاقة الحديث"])
         col_widths = [ت_width, old_card_width, new_card_width, name_width, count_width] + [Cm(1.05)] * 8
-        remaining_indices = list(range(2, 12))
+        remaining_indices = [i for i in range(2, 12) if i not in hidden_orig_indices]
         headers = ["ت", "القديم", "الحديث"] + [orig_headers[i] for i in remaining_indices]
     else:
         card_width = dynamic_col_width(df["رقم البطاقة"])
         col_widths = [ت_width, card_width, name_width, count_width] + [Cm(1.05)] * 8
         remaining_indices = None
-        headers = orig_headers
+        keep_indices = [i for i in range(len(orig_headers)) if i not in hidden_orig_indices]
+        headers = [orig_headers[i] for i in keep_indices]
 
     table = doc.add_table(rows=1, cols=len(headers))
     table.style, table.alignment = 'Table Grid', WD_TABLE_ALIGNMENT.CENTER
@@ -1453,17 +1526,19 @@ def build_professional_word_report_v8(df, filename_base, card_choice, sort_alpha
         cell.width, cell.vertical_alignment = new_card_width, WD_ALIGN_VERTICAL.CENTER
         format_cell_advanced(cell, "الحديث", bold=True, size_pt=12, font_name="Segoe UI Semibold", align="center", color_rgb=COLOR_NAVY_BLUE)
         j = 3
-        # col_widths here is indexed by NEW layout position, matching remaining_indices' write order
-        remaining_widths = [name_width, count_width] + [Cm(1.05)] * 8
-        for pos, i in enumerate(remaining_indices):
+        # عرض كل عمود مربوط بموضعه الأصلي في orig_headers (لا بترتيبه الظاهر)
+        # حتى يبقى صحيحاً بصرف النظر عن أي عمود مُخفى بفلتر الكلي/مستحق/محجوب.
+        width_by_orig_idx = {2: name_width, 3: count_width, **{k: Cm(1.05) for k in range(4, 12)}}
+        for i in remaining_indices:
             cell = hdr_cells[j]
-            cell.width, cell.vertical_alignment = remaining_widths[pos], WD_ALIGN_VERTICAL.CENTER
+            cell.width, cell.vertical_alignment = width_by_orig_idx[i], WD_ALIGN_VERTICAL.CENTER
             title = orig_headers[i]
             format_cell_advanced(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="left" if i == 2 else "center", color_rgb=COLOR_NAVY_BLUE)
             j += 1
     else:
-        for i, title in enumerate(headers):
-            cell = hdr_cells[i]
+        for target_col, i in enumerate(keep_indices):
+            title = orig_headers[i]
+            cell = hdr_cells[target_col]
             cell.width = col_widths[i]
             cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
             if i == 1:
@@ -1504,10 +1579,9 @@ def build_professional_word_report_v8(df, filename_base, card_choice, sort_alpha
             if is_eligible_zero: set_cell_background(cell, "EC7063")
 
             j = 3
-            remaining_widths = [name_width, count_width] + [Cm(1.05)] * 8
-            for pos, i in enumerate(remaining_indices):
+            for i in remaining_indices:
                 cell = row_cells[j]
-                cell.width, cell.vertical_alignment = remaining_widths[pos], WD_ALIGN_VERTICAL.CENTER
+                cell.width, cell.vertical_alignment = width_by_orig_idx[i], WD_ALIGN_VERTICAL.CENTER
                 if i == 2: set_cell_no_wrap(cell)
                 val = row["ت"] if i == 0 else row["رقم البطاقة"] if i == 1 else row["اسم رب الأسرة"] if i == 2 else row["مستحق"] if i == 3 else ""
                 cell_align = "left" if i == 2 else "center"
@@ -1521,8 +1595,8 @@ def build_professional_word_report_v8(df, filename_base, card_choice, sort_alpha
                 j += 1
         else:
             set_cell_no_wrap(row_cells[2])
-            for i in range(12):
-                cell = row_cells[i]
+            for target_col, i in enumerate(keep_indices):
+                cell = row_cells[target_col]
                 cell.width = col_widths[i]
                 cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
@@ -1548,7 +1622,7 @@ def build_professional_word_report_v8(df, filename_base, card_choice, sort_alpha
 # bidiVisual عمداً (الملف المصدر لا يستخدمه)، ولا يُطبّق تظليل أحمر للمستحق=صفر
 # (الملف المصدر لا يطبّق هذه الميزة على هذا النموذج بالتحديد).
 # -----------------------------------------------------------------------------
-def build_professional_word_report_v9(df, filename_base, card_choice, sort_alphabetically=True):
+def build_professional_word_report_v9(df, filename_base, card_choice, sort_alphabetically=True, visible_totals=None):
     doc = Document()
     setup_document_layout(doc, filename_base)
 
@@ -1562,8 +1636,11 @@ def build_professional_word_report_v9(df, filename_base, card_choice, sort_alpha
     title_run.font.name, title_run.font.size, title_run.bold = "Segoe UI Semibold", Pt(14), True
 
     dynamic_name_width = Cm(max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15) * 0.22 + 0.5)
-    headers = ["ت", "اسم رب الأسرة", "مستحق", "طحين", "سكر", "زيت", "رز", "معجون", "باقوليات", "التاريخ"]
+    orig_headers = ["ت", "اسم رب الأسرة", "مستحق", "طحين", "سكر", "زيت", "رز", "معجون", "باقوليات", "التاريخ"]
     col_widths = [Cm(1.13), dynamic_name_width, Cm(0.95)] + [Cm(1.52)] * 7
+    hidden_orig_indices = {i for i, h in enumerate(orig_headers) if h in _hidden_total_labels(visible_totals)}
+    keep_indices = [i for i in range(len(orig_headers)) if i not in hidden_orig_indices]
+    headers = [orig_headers[i] for i in keep_indices]
 
     # لون ونمط كل عنوان مطابق تماماً لتصميم الملف الأصلي المرفوع (لكل مادة لون مميز خاص بها)
     header_styles = {
@@ -1586,8 +1663,9 @@ def build_professional_word_report_v9(df, filename_base, card_choice, sort_alpha
     table.rows[0].height = Pt(50.4)
 
     hdr_cells = table.rows[0].cells
-    for i, title in enumerate(headers):
-        cell = hdr_cells[i]
+    for target_col, i in enumerate(keep_indices):
+        title = orig_headers[i]
+        cell = hdr_cells[target_col]
         cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
         style = header_styles[title]
         format_cell_advanced(cell, title, bold=True, size_pt=style["size"], font_name=style["font"], align="center", color_rgb=RGBColor.from_string(style["color"]))
@@ -1608,8 +1686,8 @@ def build_professional_word_report_v9(df, filename_base, card_choice, sort_alpha
         row_cells = new_row.cells
         new_row._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
 
-        for i in range(len(headers)):
-            cell = row_cells[i]
+        for target_col, i in enumerate(keep_indices):
+            cell = row_cells[target_col]
             cell.width = col_widths[i]
             cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
             if i == 0:
@@ -1629,7 +1707,7 @@ def build_professional_word_report_v9(df, filename_base, card_choice, sort_alpha
 # النموذج العاشر: أبسط قالب بالنظام — ت / الاسم الرباعي / العدد المستحق /
 # حقل فارغ فقط، بنفس هوية التصميم المستخدمة بباقي القوالب (نفس الخط
 # والألوان وبنرات الترتيب الأبجدي وتذييل الإحصائيات).
-def build_professional_word_report_v10(df, filename_base, card_choice, sort_alphabetically=True):
+def build_professional_word_report_v10(df, filename_base, card_choice, sort_alphabetically=True, visible_totals=None):
     doc = Document()
     setup_document_layout(doc, filename_base)
 
@@ -1643,9 +1721,12 @@ def build_professional_word_report_v10(df, filename_base, card_choice, sort_alph
     title_run.font.name, title_run.font.size, title_run.bold = "Segoe UI Semibold", Pt(14), True
 
     dynamic_name_width = Cm(max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15) * 0.22 + 0.5)
-    headers = ["ت", "الاسم الرباعي", "العدد المستحق", "حقل فارغ"]
+    orig_headers = ["ت", "الاسم الرباعي", "العدد المستحق", "حقل فارغ"]
     col_widths = [Cm(1.2), dynamic_name_width, Cm(2.4), Cm(6.5)]
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
+    hidden_orig_indices = {i for i, h in enumerate(orig_headers) if h in _hidden_total_labels(visible_totals)}
+    keep_indices = [i for i in range(len(orig_headers)) if i not in hidden_orig_indices]
+    headers = [orig_headers[i] for i in keep_indices]
 
     table = doc.add_table(rows=1, cols=len(headers))
     table.style, table.alignment = 'Table Grid', WD_TABLE_ALIGNMENT.CENTER
@@ -1654,8 +1735,9 @@ def build_professional_word_report_v10(df, filename_base, card_choice, sort_alph
     table.rows[0].height = Pt(50.4)
 
     hdr_cells = table.rows[0].cells
-    for i, title in enumerate(headers):
-        cell = hdr_cells[i]
+    for target_col, i in enumerate(keep_indices):
+        title = orig_headers[i]
+        cell = hdr_cells[target_col]
         cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
         format_cell_advanced(cell, title, bold=True, size_pt=14, font_name="Segoe UI Semibold", align="center", color_rgb=COLOR_NAVY_BLUE)
         if title == "العدد المستحق":
@@ -1675,31 +1757,27 @@ def build_professional_word_report_v10(df, filename_base, card_choice, sort_alph
         row_cells = new_row.cells
         new_row._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
 
-        cell = row_cells[0]
-        cell.width, cell.vertical_alignment = col_widths[0], WD_ALIGN_VERTICAL.CENTER
-        format_cell_advanced(cell, row["ت"], size_pt=14, font_name="Calibri", align="center")
-        set_cell_background(cell, current_letter_color)
-
-        cell = row_cells[1]
-        cell.width, cell.vertical_alignment = col_widths[1], WD_ALIGN_VERTICAL.CENTER
-        set_cell_no_wrap(cell)
-        format_cell_advanced(cell, row["اسم رب الأسرة"], size_pt=16, font_name="Calibri", align="right")
-
-        cell = row_cells[2]
-        cell.width, cell.vertical_alignment = col_widths[2], WD_ALIGN_VERTICAL.CENTER
-        format_cell_advanced(cell, row["مستحق"], size_pt=14, font_name="Calibri", align="center")
-        set_cell_background(cell, "E8F8F5")
-
-        cell = row_cells[3]
-        cell.width, cell.vertical_alignment = col_widths[3], WD_ALIGN_VERTICAL.CENTER
-        format_cell_advanced(cell, "", size_pt=14, font_name="Calibri", align="center")
+        for target_col, i in enumerate(keep_indices):
+            cell = row_cells[target_col]
+            cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
+            if i == 0:
+                format_cell_advanced(cell, row["ت"], size_pt=14, font_name="Calibri", align="center")
+                set_cell_background(cell, current_letter_color)
+            elif i == 1:
+                set_cell_no_wrap(cell)
+                format_cell_advanced(cell, row["اسم رب الأسرة"], size_pt=16, font_name="Calibri", align="right")
+            elif i == 2:
+                format_cell_advanced(cell, row["مستحق"], size_pt=14, font_name="Calibri", align="center")
+                set_cell_background(cell, "E8F8F5")
+            else:
+                format_cell_advanced(cell, "", size_pt=14, font_name="Calibri", align="center")
 
     return save_doc_buffer(doc, df)
 
 # النموذج الحادي عشر: نفس ترتيب أعمدة النموذج العاشر (ت/الاسم/المستحق/حقل
 # فارغ) لكن بثيم أخضر (رأس جدول أخضر، صفوف خضراء فاتحة متناوبة) وخط
 # Aref Ruqaa (خط رقعة عربي قريب لخط اليد) بدل Segoe UI Semibold.
-def build_professional_word_report_v11(df, filename_base, card_choice, sort_alphabetically=True):
+def build_professional_word_report_v11(df, filename_base, card_choice, sort_alphabetically=True, visible_totals=None):
     doc = Document()
     setup_document_layout(doc, filename_base)
 
@@ -1713,10 +1791,13 @@ def build_professional_word_report_v11(df, filename_base, card_choice, sort_alph
     title_run.font.name, title_run.font.size, title_run.bold = "Aref Ruqaa", Pt(14), True
 
     dynamic_name_width = Cm(max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15) * 0.22 + 0.5)
-    headers = ["ت", "الاسم", "المستحق", "حقل فارغ"]
+    orig_headers = ["ت", "الاسم", "المستحق", "حقل فارغ"]
     col_widths = [Cm(1.2), dynamic_name_width, Cm(2.4), Cm(6.5)]
     COLOR_WHITE = RGBColor(255, 255, 255)
     GREEN_DARK, GREEN_LIGHT = "2E7D32", "E8F5E9"
+    hidden_orig_indices = {i for i, h in enumerate(orig_headers) if h in _hidden_total_labels(visible_totals)}
+    keep_indices = [i for i in range(len(orig_headers)) if i not in hidden_orig_indices]
+    headers = [orig_headers[i] for i in keep_indices]
 
     table = doc.add_table(rows=1, cols=len(headers))
     table.style, table.alignment = 'Table Grid', WD_TABLE_ALIGNMENT.CENTER
@@ -1725,8 +1806,9 @@ def build_professional_word_report_v11(df, filename_base, card_choice, sort_alph
     table.rows[0].height = Pt(50.4)
 
     hdr_cells = table.rows[0].cells
-    for i, title in enumerate(headers):
-        cell = hdr_cells[i]
+    for target_col, i in enumerate(keep_indices):
+        title = orig_headers[i]
+        cell = hdr_cells[target_col]
         cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
         format_cell_advanced(cell, title, bold=True, size_pt=14, font_name="Aref Ruqaa", align="center", color_rgb=COLOR_WHITE)
         set_cell_background(cell, GREEN_DARK)
@@ -1746,31 +1828,102 @@ def build_professional_word_report_v11(df, filename_base, card_choice, sort_alph
         new_row._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
         row_bg = GREEN_LIGHT if idx % 2 == 0 else None
 
-        cell = row_cells[0]
-        cell.width, cell.vertical_alignment = col_widths[0], WD_ALIGN_VERTICAL.CENTER
-        format_cell_advanced(cell, row["ت"], size_pt=14, font_name="Aref Ruqaa", align="center")
-        set_cell_background(cell, current_letter_color)
+        for target_col, i in enumerate(keep_indices):
+            cell = row_cells[target_col]
+            cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
+            if i == 0:
+                format_cell_advanced(cell, row["ت"], size_pt=14, font_name="Aref Ruqaa", align="center")
+                set_cell_background(cell, current_letter_color)
+            elif i == 1:
+                set_cell_no_wrap(cell)
+                format_cell_advanced(cell, row["اسم رب الأسرة"], size_pt=16, font_name="Aref Ruqaa", align="right")
+                if row_bg: set_cell_background(cell, row_bg)
+            elif i == 2:
+                format_cell_advanced(cell, row["مستحق"], size_pt=14, font_name="Aref Ruqaa", align="center")
+                set_cell_background(cell, row_bg or GREEN_LIGHT)
+            else:
+                format_cell_advanced(cell, "", size_pt=14, font_name="Aref Ruqaa", align="center")
+                if row_bg: set_cell_background(cell, row_bg)
 
-        cell = row_cells[1]
-        cell.width, cell.vertical_alignment = col_widths[1], WD_ALIGN_VERTICAL.CENTER
-        set_cell_no_wrap(cell)
-        format_cell_advanced(cell, row["اسم رب الأسرة"], size_pt=16, font_name="Aref Ruqaa", align="right")
-        if row_bg: set_cell_background(cell, row_bg)
+    return save_doc_buffer(doc, df)
 
-        cell = row_cells[2]
-        cell.width, cell.vertical_alignment = col_widths[2], WD_ALIGN_VERTICAL.CENTER
-        format_cell_advanced(cell, row["مستحق"], size_pt=14, font_name="Aref Ruqaa", align="center")
-        set_cell_background(cell, row_bg or GREEN_LIGHT)
+# النموذج الثاني عشر: نفس ترتيب أعمدة النموذج العاشر (ت/الاسم/المستحق/حقل
+# فارغ كبير للملاحظات اليدوية) — طلب صريح بناءً على صورة كشف ورقي مرجعي —
+# لكن بهوية النظام الملوّنة المعتادة (رأس كحلي، شرائط حروف، تظليل أحمر كامل
+# للصف عند مستحق=صفر) بدل الشكل الأبيض والأسود البسيط بالصورة المرجعية.
+def build_professional_word_report_v12(df, filename_base, card_choice, sort_alphabetically=True, visible_totals=None):
+    doc = Document()
+    setup_document_layout(doc, filename_base)
 
-        cell = row_cells[3]
-        cell.width, cell.vertical_alignment = col_widths[3], WD_ALIGN_VERTICAL.CENTER
-        format_cell_advanced(cell, "", size_pt=14, font_name="Aref Ruqaa", align="center")
-        if row_bg: set_cell_background(cell, row_bg)
+    clean_name = filename_base
+    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج", "الترتيب", "الأبجدي", "الابجدي", "أبجدي", "ابجدي"]: clean_name = clean_name.replace(w, " ")
+    clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', ' ', clean_name).split())
+
+    title_p = doc.add_paragraph()
+    title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    title_run = title_p.add_run(f"الكشف الإحصائي المنسق للوكيل: {clean_name}")
+    title_run.font.name, title_run.font.size, title_run.bold = "Segoe UI Semibold", Pt(14), True
+
+    dynamic_name_width = Cm(max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15) * 0.22 + 0.5)
+    orig_headers = ["ت", "اسم رب الأسرة", "المستحق", "حقل فارغ"]
+    col_widths = [Cm(1.2), dynamic_name_width, Cm(2.4), Cm(6.5)]
+    COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
+    hidden_orig_indices = {i for i, h in enumerate(orig_headers) if h in _hidden_total_labels(visible_totals)}
+    keep_indices = [i for i in range(len(orig_headers)) if i not in hidden_orig_indices]
+    headers = [orig_headers[i] for i in keep_indices]
+
+    table = doc.add_table(rows=1, cols=len(headers))
+    table.style, table.alignment = 'Table Grid', WD_TABLE_ALIGNMENT.CENTER
+    set_table_borders(table, color_hex="2A4B7C")
+    table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
+    table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
+    table.rows[0].height = Pt(50.4)
+
+    hdr_cells = table.rows[0].cells
+    for target_col, i in enumerate(keep_indices):
+        title = orig_headers[i]
+        cell = hdr_cells[target_col]
+        cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
+        format_cell_advanced(cell, title, bold=True, size_pt=14, font_name="Segoe UI Semibold", align="center", color_rgb=COLOR_NAVY_BLUE)
+        if title == "المستحق":
+            set_cell_background(cell, "DAEEF3")
+
+    prev_letter = None
+    current_letter_color = "D4E6F1"
+    for idx, row in df.iterrows():
+        if sort_alphabetically:
+            letter = get_name_group_letter(row["اسم رب الأسرة"])
+            if letter != prev_letter:
+                current_letter_color = add_letter_banner_row(table, letter)
+                prev_letter = letter
+
+        new_row = table.add_row()
+        new_row.height = Pt(30)
+        row_cells = new_row.cells
+        new_row._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
+        is_eligible_zero = int(row["مستحق"]) == 0
+
+        for target_col, i in enumerate(keep_indices):
+            cell = row_cells[target_col]
+            cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
+            if i == 0:
+                format_cell_advanced(cell, row["ت"], size_pt=14, font_name="Calibri", align="center")
+                set_cell_background(cell, "EC7063" if is_eligible_zero else current_letter_color)
+            elif i == 1:
+                set_cell_no_wrap(cell)
+                format_cell_advanced(cell, row["اسم رب الأسرة"], size_pt=16, font_name="Calibri", align="right")
+                if is_eligible_zero: set_cell_background(cell, "EC7063")
+            elif i == 2:
+                format_cell_advanced(cell, row["مستحق"], size_pt=14, font_name="Calibri", align="center")
+                set_cell_background(cell, "EC7063" if is_eligible_zero else "E8F8F5")
+            else:
+                format_cell_advanced(cell, "x" if is_eligible_zero else "", size_pt=14, font_name="Calibri", align="center")
+                if is_eligible_zero: set_cell_background(cell, "EC7063")
 
     return save_doc_buffer(doc, df)
 
 # --- الدالة الجديدة للنموذج السابع (تفاصيل المواد) ---
-def build_professional_word_report_v7(df, filename_base, card_choice, sort_alphabetically=True):
+def build_professional_word_report_v7(df, filename_base, card_choice, sort_alphabetically=True, visible_totals=None):
     doc = Document()
     setup_document_layout(doc, filename_base)
     
@@ -1797,7 +1950,14 @@ def build_professional_word_report_v7(df, filename_base, card_choice, sort_alpha
     COLOR_NAVY_BLUE = RGBColor(42, 75, 124)
     remaining_indices = ([1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] if show_children else [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) if is_combined else None
 
-    headers = (["ت", "القديم", "الحديث"] + [orig_headers[i] for i in remaining_indices]) if is_combined else orig_headers
+    hidden_orig_indices = {i for i, h in enumerate(orig_headers) if h in _hidden_total_labels(visible_totals)}
+    keep_indices = None
+    if is_combined:
+        remaining_indices = [i for i in remaining_indices if i not in hidden_orig_indices]
+        headers = ["ت", "القديم", "الحديث"] + [orig_headers[i] for i in remaining_indices]
+    else:
+        keep_indices = [i for i in range(len(orig_headers)) if i not in hidden_orig_indices]
+        headers = [orig_headers[i] for i in keep_indices]
     table = doc.add_table(rows=1, cols=len(headers))
     table.style, table.alignment = 'Table Grid', WD_TABLE_ALIGNMENT.CENTER
     set_table_borders(table, color_hex="2A4B7C")
@@ -1825,8 +1985,9 @@ def build_professional_word_report_v7(df, filename_base, card_choice, sort_alpha
             format_cell_advanced(cell, title, bold=True, size_pt=12, font_name="Segoe UI Semibold", align="left" if i == 1 else "center", color_rgb=COLOR_NAVY_BLUE)
             j += 1
     else:
-        for i, title in enumerate(headers):
-            cell = table.rows[0].cells[i]
+        for target_col, i in enumerate(keep_indices):
+            title = orig_headers[i]
+            cell = table.rows[0].cells[target_col]
             cell.width = col_widths[i]
             cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
             # جعل النصوص للأرقام والمواد بشكل عمودي
@@ -1894,8 +2055,8 @@ def build_professional_word_report_v7(df, filename_base, card_choice, sort_alpha
                 j += 1
         else:
             set_cell_no_wrap(row_cells[1])
-            for i in range(len(headers)):
-                cell = row_cells[i]
+            for target_col, i in enumerate(keep_indices):
+                cell = row_cells[target_col]
                 cell.width = col_widths[i]
                 cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                 val = _v7_cell_value(i)
@@ -2044,7 +2205,7 @@ def get_pdf_font_face_css():
 # -----------------------------------------------------------------------------
 # المحرك الجديد: إنشاء تقارير PDF
 # -----------------------------------------------------------------------------
-def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort_alphabetically=True, agent_metadata=None):
+def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort_alphabetically=True, agent_metadata=None, visible_totals=None):
     """يبني نص HTML الكامل للكشف (نفس التصميم المستخدم لملف PDF)، بمعزل عن
     خطوة التحويل لـPDF، حتى تُعاد استخدامه أيضاً لتوليد نسخة HTML تفاعلية
     قابلة للتعديل والطباعة مباشرة من المتصفح."""
@@ -2102,6 +2263,10 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
         headers = ["ت", "الاسم", "المستحق", "حقل فارغ"]
         page_size = "A4"
         page_orientation = "portrait"
+    elif template_choice == "النموذج الثاني عشر (ت، اسم رب الأسرة، المستحق، حقل فارغ)":
+        headers = ["ت", "اسم رب الأسرة", "المستحق", "حقل فارغ"]
+        page_size = "A4"
+        page_orientation = "portrait"
     else:
         headers = ["ت", "اسم رب الأسرة", "عدد الأفراد المستحقة", "حقل كبير فارغ", "حقل كبير فارغ"]
         page_size = "A3"
@@ -2113,6 +2278,14 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
     kuli_insert_idx = headers.index("الكلي") + 1 if (show_children and "الكلي" in headers) else None
     if kuli_insert_idx is not None:
         headers.insert(kuli_insert_idx, "اطفال")
+
+    # فلتر "ماذا تريد أن يظهر داخل الملف؟": إخفاء أي من أعمدة الكلي/مستحق/محجوب
+    # (بأي تسمية فعلية يحملها هذا القالب) حسب اختيار المستخدم. يُحسب keep_indices
+    # مرة واحدة هنا على أساس headers الحالية، ويُعاد استخدامه لاحقاً لتصفية
+    # vals كل صف بنفس الترتيب تماماً.
+    hide_total_labels = _hidden_total_labels(visible_totals)
+    keep_indices = [i for i, h in enumerate(headers) if h not in hide_total_labels]
+    headers = [headers[i] for i in keep_indices]
 
     rows_html = ""
     prev_letter = None
@@ -2271,6 +2444,13 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
                 (row["مستحق"], ""),
                 ('<span class="green-checkbox"></span>', "")
             ]
+        elif template_choice == "النموذج الثاني عشر (ت، اسم رب الأسرة، المستحق، حقل فارغ)":
+            vals = [
+                (row["ت"], ter_bg),
+                (display_name, "text-align: right; font-weight: bold; font-size: 14pt;"),
+                (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
+                ("x" if is_eligible_zero else "", "")
+            ]
         else:
             vals = [
                 (row["ت"], ter_bg),
@@ -2284,6 +2464,8 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
             children_val = int(row["اطفال"])
             children_style = "background-color: #FDEBD0; color: #B9770E; font-weight: bold;" if children_val > 0 and not is_eligible_zero else ("background-color: #FDEBD0;" if not is_eligible_zero else "")
             vals.insert(kuli_insert_idx, (children_val, children_style))
+
+        vals = [vals[i] for i in keep_indices]
 
         for val, style in vals:
             cell_style = f"{row_bg} {style}"
@@ -2782,7 +2964,7 @@ def _xl_parse_css(style):
     )
 
 
-def build_excel_report(df, filename_base, card_choice, template_choice, sort_alphabetically=True, agent_metadata=None):
+def build_excel_report(df, filename_base, card_choice, template_choice, sort_alphabetically=True, agent_metadata=None, visible_totals=None):
     """يبني ملف إكسل (xlsx) لنفس القالب المختار، بنفس ترتيب الصفوف (تجميع أبجدي
     بشرائط الحروف الملوّنة) ونفس تلوين الخلايا (كلي/مستحق/محجوب/اطفال، تظليل
     صفوف مستحق=صفر) المستخدم بنسخة PDF لهذا القالب بالضبط — يُعيد هنا حساب
@@ -2813,12 +2995,18 @@ def build_excel_report(df, filename_base, card_choice, template_choice, sort_alp
         headers = ["ت", "الاسم الرباعي", "العدد المستحق", "حقل فارغ"]
     elif template_choice == "النموذج الحادي عشر (ثيم أخضر: ت، الاسم، المستحق، حقل فارغ)":
         headers = ["ت", "الاسم", "المستحق", "حقل فارغ"]
+    elif template_choice == "النموذج الثاني عشر (ت، اسم رب الأسرة، المستحق، حقل فارغ)":
+        headers = ["ت", "اسم رب الأسرة", "المستحق", "حقل فارغ"]
     else:
         headers = ["ت", "اسم رب الأسرة", "عدد الأفراد المستحقة", "حقل كبير فارغ", "حقل كبير فارغ"]
 
     kuli_insert_idx = headers.index("الكلي") + 1 if (show_children and "الكلي" in headers) else None
     if kuli_insert_idx is not None:
         headers.insert(kuli_insert_idx, "اطفال")
+
+    hide_total_labels = _hidden_total_labels(visible_totals)
+    keep_indices = [i for i, h in enumerate(headers) if h not in hide_total_labels]
+    headers = [headers[i] for i in keep_indices]
 
     wb = Workbook()
     ws = wb.active
@@ -2998,6 +3186,13 @@ def build_excel_report(df, filename_base, card_choice, template_choice, sort_alp
                 (row["مستحق"], ""),
                 ("", "")
             ]
+        elif template_choice == "النموذج الثاني عشر (ت، اسم رب الأسرة، المستحق، حقل فارغ)":
+            vals = [
+                (row["ت"], ter_bg),
+                (display_name, "text-align: right; font-weight: bold;"),
+                (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
+                ("x" if is_eligible_zero else "", "")
+            ]
         else:
             vals = [
                 (row["ت"], ter_bg),
@@ -3011,6 +3206,8 @@ def build_excel_report(df, filename_base, card_choice, template_choice, sort_alp
             children_val = int(row["اطفال"])
             children_style = "background-color: #FDEBD0; color: #B9770E; font-weight: bold;" if children_val > 0 and not is_eligible_zero else ("background-color: #FDEBD0;" if not is_eligible_zero else "")
             vals.insert(kuli_insert_idx, (children_val, children_style))
+
+        vals = [vals[i] for i in keep_indices]
 
         for col_idx, (val, style) in enumerate(vals, start=1):
             combined_style = f"{row_bg} {style}"
@@ -3040,9 +3237,9 @@ def build_excel_report(df, filename_base, card_choice, template_choice, sort_alp
     return buffer
 
 
-def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alphabetically=True, agent_metadata=None):
+def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alphabetically=True, agent_metadata=None, visible_totals=None):
     html_doc, page_size, page_orientation, _headers = _build_report_html_doc(
-        df, filename_base, card_choice, template_choice, sort_alphabetically, agent_metadata
+        df, filename_base, card_choice, template_choice, sort_alphabetically, agent_metadata, visible_totals
     )
 
     if WEASYPRINT_AVAILABLE:
@@ -3116,7 +3313,8 @@ with col3:
             "النموذج الثامن (8 سلات، العدد المستحق)",
             "النموذج التاسع (توزيع مواد غذائية، بدون رقم بطاقة)",
             "النموذج العاشر (ت، الاسم الرباعي، العدد المستحق، حقل فارغ)",
-            "النموذج الحادي عشر (ثيم أخضر: ت، الاسم، المستحق، حقل فارغ)"
+            "النموذج الحادي عشر (ثيم أخضر: ت، الاسم، المستحق، حقل فارغ)",
+            "النموذج الثاني عشر (ت، اسم رب الأسرة، المستحق، حقل فارغ)"
         ],
         index=0,
         horizontal=False
@@ -3140,6 +3338,20 @@ show_children_filter = st.checkbox(
     value=False
 )
 
+st.markdown("**📋 ماذا تريد أن يظهر داخل الملف؟** (اختر عموداً واحداً أو أكثر — تنطبق على كل النماذج الـ11)")
+tot_col1, tot_col2, tot_col3 = st.columns(3)
+with tot_col1:
+    show_kuli = st.checkbox("الكلي", value=True, key="show_kuli_chk")
+with tot_col2:
+    show_mustahaq = st.checkbox("المستحق", value=True, key="show_mustahaq_chk")
+with tot_col3:
+    show_mahjoob = st.checkbox("المحجوب", value=True, key="show_mahjoob_chk")
+
+visible_totals = {c for c, v in [("كلي", show_kuli), ("مستحق", show_mustahaq), ("محجوب", show_mahjoob)] if v}
+if not visible_totals:
+    st.warning("⚠️ يجب اختيار عمود واحد على الأقل من (الكلي/المستحق/المحجوب) — سيتم عرض الكل تلقائياً.")
+    visible_totals = {"كلي", "مستحق", "محجوب"}
+
 st.markdown("<br>", unsafe_allow_html=True)
 
 if uploaded_files:
@@ -3150,7 +3362,8 @@ if uploaded_files:
         st.session_state.name_choice != name_length_choice or
         st.session_state.sort_choice != sort_choice or
         st.session_state.merge_choice != merge_choice or
-        st.session_state.get("show_children_filter") != show_children_filter):
+        st.session_state.get("show_children_filter") != show_children_filter or
+        st.session_state.get("visible_totals") != visible_totals):
         st.session_state.processing_done = False
 
 if st.button("⚙️ تشغيل محرك التنظيم والتنسيق المتقدم الكلي"):
@@ -3205,6 +3418,7 @@ if st.button("⚙️ تشغيل محرك التنظيم والتنسيق الم�
                     st.session_state.sort_choice = sort_choice
                     st.session_state.merge_choice = merge_choice
                     st.session_state.show_children_filter = show_children_filter
+                    st.session_state.visible_totals = visible_totals
                     st.session_state.extraction_warnings = file_warnings
                     st.session_state.processing_done = True
                 else:
@@ -3218,6 +3432,7 @@ if st.session_state.processing_done:
     used_card_type = st.session_state.selected_card
     used_template = st.session_state.template_choice
     used_sort_alphabetically = (st.session_state.sort_choice != SORT_KEEP_ORIGINAL)
+    used_visible_totals = st.session_state.visible_totals
     order_note = "أبجدياً" if used_sort_alphabetically else "بترتيب الملف الأصلي"
     results = st.session_state.results
     mode_note = "تم دمج الملفات المرفوعة بملف واحد" if st.session_state.merge_choice == "دمج كل الملفات في ملف واحد وترتيبها" else f"تمت معالجة {len(results)} ملف بشكل منفصل"
@@ -3228,29 +3443,31 @@ if st.session_state.processing_done:
         for w in warns:
             st.warning(f"⚠️ تنبيه فحص بيانات — ملف \"{fname}\": {w}")
 
-    def build_word_for_template(df_final, output_filename, used_card_type, used_template, used_sort_alphabetically=True):
+    def build_word_for_template(df_final, output_filename, used_card_type, used_template, used_sort_alphabetically=True, used_visible_totals=None):
         if used_template == "النموذج الأول (الأصلي المطور)":
-            return build_professional_word_report(df_final, output_filename, used_card_type, used_sort_alphabetically)
+            return build_professional_word_report(df_final, output_filename, used_card_type, used_sort_alphabetically, used_visible_totals)
         elif used_template == "النموذج الثاني (حجم 14 وحقلين فارغين)":
-            return build_professional_word_report_v2(df_final, output_filename, used_card_type, used_sort_alphabetically)
+            return build_professional_word_report_v2(df_final, output_filename, used_card_type, used_sort_alphabetically, used_visible_totals)
         elif used_template == "النموذج الثالث (خط 16، عناوين 12، 4 أشهر)":
-            return build_professional_word_report_v3(df_final, output_filename, used_card_type, used_sort_alphabetically)
+            return build_professional_word_report_v3(df_final, output_filename, used_card_type, used_sort_alphabetically, used_visible_totals)
         elif used_template == "النموذج الرابع (12 سلة، العدد الكلي)":
-            return build_professional_word_report_v4(df_final, output_filename, used_card_type, used_sort_alphabetically)
+            return build_professional_word_report_v4(df_final, output_filename, used_card_type, used_sort_alphabetically, used_visible_totals)
         elif used_template == "النموذج السادس (12 سلة، العدد المستحق)":
-            return build_professional_word_report_v6(df_final, output_filename, used_card_type, used_sort_alphabetically)
+            return build_professional_word_report_v6(df_final, output_filename, used_card_type, used_sort_alphabetically, used_visible_totals)
         elif used_template == "النموذج السابع (تفصيل المواد الغذائية)":
-            return build_professional_word_report_v7(df_final, output_filename, used_card_type, used_sort_alphabetically)
+            return build_professional_word_report_v7(df_final, output_filename, used_card_type, used_sort_alphabetically, used_visible_totals)
         elif used_template == "النموذج الثامن (8 سلات، العدد المستحق)":
-            return build_professional_word_report_v8(df_final, output_filename, used_card_type, used_sort_alphabetically)
+            return build_professional_word_report_v8(df_final, output_filename, used_card_type, used_sort_alphabetically, used_visible_totals)
         elif used_template == "النموذج التاسع (توزيع مواد غذائية، بدون رقم بطاقة)":
-            return build_professional_word_report_v9(df_final, output_filename, used_card_type, used_sort_alphabetically)
+            return build_professional_word_report_v9(df_final, output_filename, used_card_type, used_sort_alphabetically, used_visible_totals)
         elif used_template == "النموذج العاشر (ت، الاسم الرباعي، العدد المستحق، حقل فارغ)":
-            return build_professional_word_report_v10(df_final, output_filename, used_card_type, used_sort_alphabetically)
+            return build_professional_word_report_v10(df_final, output_filename, used_card_type, used_sort_alphabetically, used_visible_totals)
         elif used_template == "النموذج الحادي عشر (ثيم أخضر: ت، الاسم، المستحق، حقل فارغ)":
-            return build_professional_word_report_v11(df_final, output_filename, used_card_type, used_sort_alphabetically)
+            return build_professional_word_report_v11(df_final, output_filename, used_card_type, used_sort_alphabetically, used_visible_totals)
+        elif used_template == "النموذج الثاني عشر (ت، اسم رب الأسرة، المستحق، حقل فارغ)":
+            return build_professional_word_report_v12(df_final, output_filename, used_card_type, used_sort_alphabetically, used_visible_totals)
         else:
-            return build_professional_word_report_v5(df_final, output_filename, used_card_type, used_sort_alphabetically)
+            return build_professional_word_report_v5(df_final, output_filename, used_card_type, used_sort_alphabetically, used_visible_totals)
 
     for idx, item in enumerate(results):
         df_final = item["df"]
@@ -3260,7 +3477,7 @@ if st.session_state.processing_done:
         st.markdown(f"---\n#### 📄 {output_filename} — ({len(df_final)}) قيد اسم")
 
         with st.spinner(f'جاري صياغة وهيكلة مستندات Word و PDF لملف "{output_filename}"...'):
-            word_output = build_word_for_template(df_final, output_filename, used_card_type, used_template, used_sort_alphabetically)
+            word_output = build_word_for_template(df_final, output_filename, used_card_type, used_template, used_sort_alphabetically, used_visible_totals)
 
         dl_col1, dl_col2, dl_col3 = st.columns(3)
 
@@ -3276,7 +3493,7 @@ if st.session_state.processing_done:
         with dl_col2:
             if PDFKIT_AVAILABLE or WEASYPRINT_AVAILABLE:
                 try:
-                    pdf_output = build_pdf_report(df_final, output_filename, used_card_type, used_template, used_sort_alphabetically, agent_metadata)
+                    pdf_output = build_pdf_report(df_final, output_filename, used_card_type, used_template, used_sort_alphabetically, agent_metadata, used_visible_totals)
                     st.download_button(
                         label="📕 تحميل الكشف المنسق (PDF جاهز للطباعة)",
                         data=pdf_output,
@@ -3291,7 +3508,7 @@ if st.session_state.processing_done:
 
         with dl_col3:
             try:
-                excel_output = build_excel_report(df_final, output_filename, used_card_type, used_template, used_sort_alphabetically, agent_metadata)
+                excel_output = build_excel_report(df_final, output_filename, used_card_type, used_template, used_sort_alphabetically, agent_metadata, used_visible_totals)
                 st.download_button(
                     label="📊 تحميل الكشف المنسق (Excel)",
                     data=excel_output,
