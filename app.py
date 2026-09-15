@@ -939,7 +939,7 @@ def build_professional_word_report(df, filename_base, card_choice, sort_alphabet
         if is_combined:
             cell = row_cells[0]
             cell.width, cell.vertical_alignment = col_widths[0], WD_ALIGN_VERTICAL.CENTER
-            format_cell_advanced(cell, row["ت"], size_pt=16, font_name="Calibri", align="center")
+            format_cell_advanced(cell, row["ت"], size_pt=9.6, font_name="Calibri", align="center")
             if is_eligible_zero: set_cell_background(cell, "EC7063")
             else: set_cell_background(cell, current_letter_color)
             j = 1
@@ -1089,7 +1089,7 @@ def build_professional_word_report_v2(df, filename_base, card_choice, sort_alpha
         if is_combined:
             cell = row_cells[0]
             cell.width, cell.vertical_alignment = col_widths[0], WD_ALIGN_VERTICAL.CENTER
-            format_cell_advanced(cell, row["ت"], size_pt=14, font_name="Calibri", align="center")
+            format_cell_advanced(cell, row["ت"], size_pt=8.4, font_name="Calibri", align="center")
             if is_eligible_zero: set_cell_background(cell, "EC7063")
             else: set_cell_background(cell, current_letter_color)
             j = 1
@@ -1235,7 +1235,7 @@ def build_professional_word_report_v3(df, filename_base, card_choice, sort_alpha
         if is_combined:
             cell = row_cells[0]
             cell.width, cell.vertical_alignment = col_widths[0], WD_ALIGN_VERTICAL.CENTER
-            format_cell_advanced(cell, row["ت"], size_pt=16, font_name="Calibri", align="center")
+            format_cell_advanced(cell, row["ت"], size_pt=9.6, font_name="Calibri", align="center")
             if is_eligible_zero: set_cell_background(cell, "EC7063")
             else: set_cell_background(cell, current_letter_color)
             j = 1
@@ -1362,7 +1362,7 @@ def build_professional_word_report_v4(df, filename_base, card_choice, sort_alpha
         if is_combined:
             cell = row_cells[0]
             cell.width, cell.vertical_alignment = col_widths[0], WD_ALIGN_VERTICAL.CENTER
-            format_cell_advanced(cell, row["ت"], size_pt=14, font_name="Calibri", align="center")
+            format_cell_advanced(cell, row["ت"], size_pt=8.4, font_name="Calibri", align="center")
             if is_eligible_zero: set_cell_background(cell, "EC7063")
             else: set_cell_background(cell, current_letter_color)
             j = 1
@@ -1475,6 +1475,8 @@ def build_professional_word_report_v5(df, filename_base, card_choice, sort_alpha
 
             if i == 1:
                 format_name_cell_with_small_suffix(cell, val, base_size=16, small_size=10, font_name="Microsoft Uighur", color_rgb=text_color, align=cell_align)
+            elif i == 0:
+                format_cell_advanced(cell, val, size_pt=9.6, font_name="Microsoft Uighur", color_rgb=text_color, align=cell_align)
             else:
                 format_cell_advanced(cell, val, size_pt=16, font_name="Microsoft Uighur", color_rgb=text_color, align=cell_align)
 
@@ -1567,7 +1569,7 @@ def build_professional_word_report_v6(df, filename_base, card_choice, sort_alpha
         if is_combined:
             cell = row_cells[0]
             cell.width, cell.vertical_alignment = col_widths[0], WD_ALIGN_VERTICAL.CENTER
-            format_cell_advanced(cell, row["ت"], size_pt=14, font_name="Calibri", align="center")
+            format_cell_advanced(cell, row["ت"], size_pt=8.4, font_name="Calibri", align="center")
             if is_eligible_zero: set_cell_background(cell, "EC7063")
             else: set_cell_background(cell, current_letter_color)
             j = 1
@@ -1714,7 +1716,7 @@ def build_professional_word_report_v8(df, filename_base, card_choice, sort_alpha
         if is_combined:
             cell = row_cells[0]
             cell.width, cell.vertical_alignment = col_widths[0], WD_ALIGN_VERTICAL.CENTER
-            format_cell_advanced(cell, row["ت"], size_pt=14, font_name="Calibri", align="center")
+            format_cell_advanced(cell, row["ت"], size_pt=8.4, font_name="Calibri", align="center")
             if is_eligible_zero: set_cell_background(cell, "EC7063")
             else: set_cell_background(cell, current_letter_color)
 
@@ -1841,7 +1843,7 @@ def build_professional_word_report_v9(df, filename_base, card_choice, sort_alpha
             cell.width = col_widths[i]
             cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
             if i == 0:
-                format_cell_advanced(cell, row["ت"], size_pt=14, font_name="Calibri", align="center")
+                format_cell_advanced(cell, row["ت"], size_pt=8.4, font_name="Calibri", align="center")
                 set_cell_background(cell, current_letter_color)
             elif i == 1:
                 set_cell_no_wrap(cell)
@@ -1911,7 +1913,7 @@ def build_professional_word_report_v10(df, filename_base, card_choice, sort_alph
             cell = row_cells[target_col]
             cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
             if i == 0:
-                format_cell_advanced(cell, row["ت"], size_pt=14, font_name="Calibri", align="center")
+                format_cell_advanced(cell, row["ت"], size_pt=8.4, font_name="Calibri", align="center")
                 set_cell_background(cell, current_letter_color)
             elif i == 1:
                 set_cell_no_wrap(cell)
@@ -1982,7 +1984,7 @@ def build_professional_word_report_v11(df, filename_base, card_choice, sort_alph
             cell = row_cells[target_col]
             cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
             if i == 0:
-                format_cell_advanced(cell, row["ت"], size_pt=14, font_name="Aref Ruqaa", align="center")
+                format_cell_advanced(cell, row["ت"], size_pt=8.4, font_name="Aref Ruqaa", align="center")
                 set_cell_background(cell, current_letter_color)
             elif i == 1:
                 set_cell_no_wrap(cell)
@@ -2057,7 +2059,7 @@ def build_professional_word_report_v12(df, filename_base, card_choice, sort_alph
             cell = row_cells[target_col]
             cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
             if i == 0:
-                format_cell_advanced(cell, row["ت"], size_pt=14, font_name="Calibri", align="center")
+                format_cell_advanced(cell, row["ت"], size_pt=8.4, font_name="Calibri", align="center")
                 set_cell_background(cell, "EC7063" if is_eligible_zero else current_letter_color)
             elif i == 1:
                 set_cell_no_wrap(cell)
@@ -2174,7 +2176,7 @@ def build_professional_word_report_v7(df, filename_base, card_choice, sort_alpha
         if is_combined:
             cell = row_cells[0]
             cell.width, cell.vertical_alignment = col_widths[0], WD_ALIGN_VERTICAL.CENTER
-            format_cell_advanced(cell, row["ت"], size_pt=14, font_name="Calibri", align="center")
+            format_cell_advanced(cell, row["ت"], size_pt=8.4, font_name="Calibri", align="center")
             if is_eligible_zero: set_cell_background(cell, "EC7063")
             else: set_cell_background(cell, current_letter_color)
             j = 1
@@ -2456,7 +2458,9 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
 
         is_eligible_zero = int(row["مستحق"]) == 0
         row_bg = "background-color: #EC7063;" if is_eligible_zero else ""
-        ter_bg = f"background-color: #{current_letter_color};" if not is_eligible_zero else ""
+        # خط عمود "ت" (الترقيم التسلسلي) مصغّر 40% عن حجم الجدول الأساسي
+        # (15.81pt) بطلب صريح، بمعزل عن بقية الأعمدة التي لا تحمل حجماً خاصاً بها.
+        ter_bg = f"background-color: #{current_letter_color}; font-size: 9.49pt;" if not is_eligible_zero else "font-size: 9.49pt;"
 
         cells_html = ""
 
