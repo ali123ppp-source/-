@@ -93,6 +93,7 @@ if "processing_done" not in st.session_state:
     st.session_state.sort_choice = ""
     st.session_state.merge_choice = ""
     st.session_state.show_children_filter = False
+    st.session_state.swap_old_new_cards = False
     st.session_state.visible_totals = {"كلي", "مستحق", "محجوب"}
     st.session_state.extraction_warnings = {}
 
@@ -493,7 +494,7 @@ def _adapt_idx_map_to_rows(rows, idx_map, max_shift=3, sample_size=12, min_score
     return adapted
 
 
-def _extract_records_by_headers(rows_data, card_choice, name_length_choice, external_idx_map=None, _out_idx_map=None):
+def _extract_records_by_headers(rows_data, card_choice, name_length_choice, external_idx_map=None, _out_idx_map=None, swap_old_new_cards=False):
     header_idx, idx_map = _locate_header_row(rows_data)
     required = ["اسم", "مستحق"]
     if header_idx == -1 or any(idx_map[k] == -1 for k in required):
@@ -508,7 +509,19 @@ def _extract_records_by_headers(rows_data, card_choice, name_length_choice, exte
         start_row = header_idx + 1
 
     if _out_idx_map is not None:
+        # يُحمَّل هنا قبل التبديل عمداً، بحيث تُبنى الورقة/الجدول اللاحق (عند
+        # عدم وجود صف عناوين خاص به) اعتماداً على الخريطة "الخام" نفسها التي
+        # استُخدمت هنا، فيُطبَّق عليه تبديل واحد فقط لا اثنان.
         _out_idx_map.append(idx_map)
+
+    # بعض الملفات المصدر تُسمّي عمودي رقم البطاقة بشكل معكوس عن محتواهما
+    # الفعلي (كملف يضع عنوان "البطاقة الجديدة" فوق العمود الذي يحمل فعلياً
+    # الرقم القديم) — لا يمكن اكتشاف هذا تلقائياً من المحتوى وحده (حجم الرقم
+    # غير موثوق كدليل)، لذا يوفَّر هذا التبديل اليدوي كخيار صريح من المستخدم
+    # بعد تأكيده من الملف الورقي الأصلي، بدل تخمين الاتجاه الصحيح.
+    if swap_old_new_cards:
+        idx_map = dict(idx_map)
+        idx_map["بطاقة_قديم"], idx_map["بطاقة_حديث"] = idx_map["بطاقة_حديث"], idx_map["بطاقة_قديم"]
 
     take = 4 if name_length_choice == "الاسم الرباعي (إن وجد)" else 3
     footer_label_re = re.compile(r'(ال)?(مجموع|اجمالي|وكيل)$')
@@ -572,7 +585,7 @@ def _extract_records_by_headers(rows_data, card_choice, name_length_choice, exte
     return records
 
 
-def _extract_records_multi_sheet(sheet_chunks, card_choice, name_length_choice):
+def _extract_records_multi_sheet(sheet_chunks, card_choice, name_length_choice, swap_old_new_cards=False):
     """يعالج كل ورقة/جدول منفصلة (sheet_chunks: قائمة قوائم صفوف) بخريطة
     أعمدة خاصة بها إن وُجد لها صف عناوين، وإلا يرث خريطة آخر ورقة نجحت
     ويحاول تكييفها لصفوفها (انظر _adapt_idx_map_to_rows) — يمنع هذا اختلاط
@@ -585,7 +598,7 @@ def _extract_records_multi_sheet(sheet_chunks, card_choice, name_length_choice):
         if not rows:
             continue
         out_box = []
-        records = _extract_records_by_headers(rows, card_choice, name_length_choice, carried_idx_map, out_box)
+        records = _extract_records_by_headers(rows, card_choice, name_length_choice, carried_idx_map, out_box, swap_old_new_cards)
         if records is None:
             continue
         all_records.extend(records)
@@ -680,7 +693,7 @@ def _extract_full_oxml_text(oxml_element):
 # -----------------------------------------------------------------------------
 # محرك قراءة وتنظيف البيانات المطور
 # -----------------------------------------------------------------------------
-def extract_and_clean_data(file_obj, card_choice, name_length_choice, sort_alphabetically=True, sort_by_card_within_group=False, sort_by_card_only=False):
+def extract_and_clean_data(file_obj, card_choice, name_length_choice, sort_alphabetically=True, sort_by_card_within_group=False, sort_by_card_only=False, swap_old_new_cards=False):
     raw_records = []
     rows_data = []
     # مصدر منفصل تماماً لاستخراج بيانات الوكيل (مركز/رقم وكالة/اسم) — لا يُمرَّر
@@ -734,7 +747,7 @@ def extract_and_clean_data(file_obj, card_choice, name_length_choice, sort_alpha
 
     agent_metadata = _extract_agent_metadata(metadata_rows)
 
-    header_records = _extract_records_multi_sheet(sheet_chunks, card_choice, name_length_choice)
+    header_records = _extract_records_multi_sheet(sheet_chunks, card_choice, name_length_choice, swap_old_new_cards)
     if header_records:
         warnings = _validate_extracted_records(header_records)
         df = pd.DataFrame(header_records)
@@ -3481,6 +3494,12 @@ show_children_filter = st.checkbox(
     value=False
 )
 
+swap_old_new_cards = st.checkbox(
+    "🔀 تبديل رقم البطاقة القديم والحديث (فعّل هذا الخيار فقط إذا تأكدت أن الملف المصدر "
+    "يضع رقم البطاقة القديم تحت عنوان \"الحديث/الجديدة\" والحديث تحت عنوان \"القديم\" أو بلا تسمية — أي معكوسان)",
+    value=False
+)
+
 st.markdown("**📋 ماذا تريد أن يظهر داخل الملف؟** (اختر عموداً واحداً أو أكثر — تنطبق على كل النماذج الـ11)")
 tot_col1, tot_col2, tot_col3 = st.columns(3)
 with tot_col1:
@@ -3506,6 +3525,7 @@ if uploaded_files:
         st.session_state.sort_choice != sort_choice or
         st.session_state.merge_choice != merge_choice or
         st.session_state.get("show_children_filter") != show_children_filter or
+        st.session_state.get("swap_old_new_cards") != swap_old_new_cards or
         st.session_state.get("visible_totals") != visible_totals):
         st.session_state.processing_done = False
 
@@ -3518,7 +3538,7 @@ if st.button("⚙️ تشغيل محرك التنظيم والتنسيق الم�
                 extracted = []
                 file_warnings = {}
                 for f in uploaded_files:
-                    df_res, extraction_warnings, agent_metadata = extract_and_clean_data(f, selected_card, name_length_choice, sort_alphabetically, sort_by_card_within_group, sort_by_card_only)
+                    df_res, extraction_warnings, agent_metadata = extract_and_clean_data(f, selected_card, name_length_choice, sort_alphabetically, sort_by_card_within_group, sort_by_card_only, swap_old_new_cards)
                     if not df_res.empty:
                         extracted.append({"filename": f.name.rsplit('.', 1)[0], "df": df_res, "metadata": agent_metadata})
                         log_processed_file(f.name, len(df_res), selected_card, name_length_choice, template_choice, sort_choice)
@@ -3563,6 +3583,7 @@ if st.button("⚙️ تشغيل محرك التنظيم والتنسيق الم�
                     st.session_state.sort_choice = sort_choice
                     st.session_state.merge_choice = merge_choice
                     st.session_state.show_children_filter = show_children_filter
+                    st.session_state.swap_old_new_cards = swap_old_new_cards
                     st.session_state.visible_totals = visible_totals
                     st.session_state.extraction_warnings = file_warnings
                     st.session_state.processing_done = True
