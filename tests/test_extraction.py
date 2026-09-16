@@ -46,6 +46,7 @@ def _install_streamlit_stub():
         setattr(st_stub, fn, _noop)
     st_stub.columns = lambda n, **k: [_Ctx() for _ in range(n if isinstance(n, int) else len(n))]
     st_stub.expander = lambda *a, **k: _Ctx()
+    st_stub.container = lambda *a, **k: _Ctx()
     st_stub.spinner = lambda *a, **k: _Spinner()
     sys.modules["streamlit"] = st_stub
 
