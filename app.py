@@ -2146,22 +2146,22 @@ def build_professional_word_report_v12(df, filename_base, card_choice, sort_alph
 
     return save_doc_buffer(doc, df)
 
-# --- النموذج الثالث عشر: تصميم فاخر بلوحة ألوان أحادية (كحلي/ذهبي) بديلاً عن
-# الألوان المتعددة الصارخة بالنماذج الأخرى — أثبت بحث اتجاهات 2026 أن لوحة
-# محدودة بعمق تدرّجي واحد تبدو أرقى وأكثر احترافية من مزيج ألوان "قوس قزح"،
-# مع الاحتفاظ بالتحذير الأحمر القوي لحالة "مستحق=0" فقط لأنه استثناء حقيقي
-# يجب أن يبقى لافتاً بصرياً بصرف النظر عن رصانة باقي التصميم.
+# --- النموذج الثالث عشر: تصميم "بلا شبكة" جريء ومختلف بنيوياً عن كل القوالب
+# الأخرى (المشتركة كلها في شكل الجدول المسطّر الكلاسيكي، بصرف النظر عن
+# الألوان) — شريط تلوين جانبي رفيع بدل تلوين الخلية كاملة، رقم تسلسل كبير
+# باهت كعنصر تصميمي هادئ، رقم البطاقة كسطر ثانٍ صغير تحت الاسم بدل عمود
+# مستقل، وحدود خفيفة جداً بين الصفوف بدل شبكة كحلية غليظة. صف "مستحق=صفر"
+# يُبرَز بشريط أحمر جانبي عريض + نص أحمر + أيقونة تحذير، لا تظليل كامل صريح.
 def build_professional_word_report_v13(df, filename_base, card_choice, sort_alphabetically=True, visible_totals=None):
     doc = Document()
     setup_document_layout(doc, filename_base)
 
-    NAVY_INK = RGBColor(15, 42, 68)
+    INK = RGBColor(20, 36, 59)
+    GHOST = RGBColor(199, 210, 224)
+    SUBTEXT = RGBColor(138, 150, 168)
     NAVY = RGBColor(27, 58, 99)
     GREEN_DEEP = RGBColor(30, 126, 67)
     RED_DEEP = RGBColor(176, 46, 38)
-    GOLD = "C9A227"
-    ZEBRA = "F2F6FB"
-    ALERT = "EC7063"
 
     clean_name = filename_base
     for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج", "الترتيب", "الأبجدي", "الابجدي", "أبجدي", "ابجدي"]: clean_name = clean_name.replace(w, " ")
@@ -2171,49 +2171,51 @@ def build_professional_word_report_v13(df, filename_base, card_choice, sort_alph
     title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     title_run = title_p.add_run(f"الكشف الإحصائي المنسق للوكيل: {clean_name}")
     title_run.font.name, title_run.font.size, title_run.bold = "Segoe UI Semibold", Pt(14), True
-    title_run.font.color.rgb = NAVY_INK
+    title_run.font.color.rgb = INK
 
     is_combined = card_choice == "القديم والحديث"
-    orig_headers = ["ت", "اسم رب الأسرة", "الكلي", "مستحق", "محجوب", card_choice, "ملاحظات"]
+    # عمود 0: شريط تلوين رفيع بلا نص (شريط الحرف/التحذير)، عمود 1: الترقيم
+    # الكبير الباهت، عمود 2: الاسم + رقم البطاقة كسطر ثانٍ، ثم الكلي/مستحق/
+    # محجوب/ملاحظات.
+    orig_headers = ["", "ت", "اسم رب الأسرة", "الكلي", "مستحق", "محجوب", "ملاحظات"]
     max_name_len = max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15)
-    dynamic_name_width = Cm(max_name_len * 0.22 + 0.5)
-    col_widths = [Cm(0.9), dynamic_name_width, Cm(1.1), Cm(1.1), Cm(1.1), Cm(1.8), Inches(1.0)]
-    remaining_indices = [1, 2, 3, 4, 6] if is_combined else None
+    dynamic_name_width = Cm(max_name_len * 0.2 + 1.2)
+    col_widths = [Cm(0.15), Cm(0.9), dynamic_name_width, Cm(1.1), Cm(1.1), Cm(1.1), Inches(1.0)]
 
-    hidden_orig_indices = {i for i, h in enumerate(orig_headers) if h in _hidden_total_labels(visible_totals)}
-    keep_indices = None
-    if is_combined:
-        remaining_indices = [i for i in remaining_indices if i not in hidden_orig_indices]
-        headers = ["ت", "القديم", "الحديث"] + [orig_headers[i] for i in remaining_indices]
-    else:
-        keep_indices = [i for i in range(len(orig_headers)) if i not in hidden_orig_indices]
-        headers = [orig_headers[i] for i in keep_indices]
+    hidden_labels = _hidden_total_labels(visible_totals)
+    # العمودان 0 و1 (الشريط والترقيم) لا يحملان تسمية إجمالية فيُستبعدان دوماً
+    # من فحص الإخفاء؛ فقط أعمدة الكلي/مستحق/محجوب قابلة للإخفاء هنا.
+    keep_indices = [i for i, h in enumerate(orig_headers) if h == "" or h not in hidden_labels]
+    headers = [orig_headers[i] for i in keep_indices]
 
     table = doc.add_table(rows=1, cols=len(headers))
     table.style, table.alignment = 'Table Grid', WD_TABLE_ALIGNMENT.CENTER
-    set_table_borders(table, color_hex="1B3A63")
+    set_table_borders(table, color_hex="E7EBF2")
     table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
     table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
-    table.rows[0].height = Inches(0.7)
+    table.rows[0].height = Inches(0.6)
 
-    def _style_header_cell(cell, title, width):
-        cell.width, cell.vertical_alignment = width, WD_ALIGN_VERTICAL.CENTER
-        format_cell_advanced(cell, title, bold=True, size_pt=13, font_name="Segoe UI Semibold", align="center", color_rgb=RGBColor(255, 255, 255))
-        set_cell_background(cell, "0F2A44")
+    for target_col, i in enumerate(keep_indices):
+        cell = table.rows[0].cells[target_col]
+        cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
+        if i == 0:
+            continue
+        format_cell_advanced(cell, orig_headers[i], bold=True, size_pt=13, font_name="Segoe UI Semibold", align="center", color_rgb=INK)
 
-    if is_combined:
-        hdr_cells = table.rows[0].cells
-        _style_header_cell(hdr_cells[0], "ت", col_widths[0])
-        j = 1
-        for label in ["القديم", "الحديث"]:
-            _style_header_cell(hdr_cells[j], label, Cm(1.8))
-            j += 1
-        for i in remaining_indices:
-            _style_header_cell(hdr_cells[j], orig_headers[i], col_widths[i])
-            j += 1
-    else:
-        for target_col, i in enumerate(keep_indices):
-            _style_header_cell(table.rows[0].cells[target_col], orig_headers[i], col_widths[i])
+    def _set_name_with_sub(cell, name_text, sub_text, name_color):
+        cell.text = ""
+        p1 = cell.paragraphs[0]
+        p1.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        p1.paragraph_format.element.get_or_add_pPr().append(parse_xml(f'<w:bidi {nsdecls("w")}/>'))
+        r1 = p1.add_run(str(name_text))
+        r1.font.name, r1.font.size, r1.bold = "Calibri", Pt(14), True
+        r1.font.color.rgb = name_color
+        p2 = cell.add_paragraph()
+        p2.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        p2.paragraph_format.element.get_or_add_pPr().append(parse_xml(f'<w:bidi {nsdecls("w")}/>'))
+        r2 = p2.add_run(str(sub_text))
+        r2.font.name, r2.font.size, r2.bold = "Calibri", Pt(9), False
+        r2.font.color.rgb = SUBTEXT
 
     prev_letter = None
     current_letter_color = "D4E6F1"
@@ -2226,64 +2228,40 @@ def build_professional_word_report_v13(df, filename_base, card_choice, sort_alph
                 prev_letter, zebra_on = letter, False
 
         new_row = table.add_row()
-        new_row.height = Inches(0.5)
+        new_row.height = Inches(0.55)
         row_cells = new_row.cells
         new_row._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
         is_eligible_zero = int(row["مستحق"]) == 0
-        base_bg = ALERT if is_eligible_zero else (ZEBRA if zebra_on else "FFFFFF")
+        zebra_bg = "FAFBFD" if zebra_on else "FFFFFF"
         zebra_on = not zebra_on
-
-        def _v13_cell_value(i, row=row, is_eligible_zero=is_eligible_zero):
-            if i == 1: return row["اسم رب الأسرة"]
-            if i == 2: return row["الكلي"]
-            if i == 3: return row["مستحق"]
-            if i == 4: return row["محجوب"]
-            if i == 6: return "محجوب" if is_eligible_zero else ""
-            return ""
-
-        def _fill_ter_cell(cell, width):
-            cell.width, cell.vertical_alignment = width, WD_ALIGN_VERTICAL.CENTER
-            format_cell_advanced(cell, row["ت"], bold=True, size_pt=9.6, font_name="Calibri", align="center", color_rgb=NAVY_INK)
-            set_cell_background(cell, ALERT if is_eligible_zero else GOLD)
+        accent = "B02E26" if is_eligible_zero else current_letter_color
+        name_color = RED_DEEP if is_eligible_zero else INK
 
         if is_combined:
-            _fill_ter_cell(row_cells[0], col_widths[0])
-            j = 1
-            for card_key in ["رقم البطاقة القديم", "رقم البطاقة الحديث"]:
-                cell = row_cells[j]
-                cell.width, cell.vertical_alignment = Cm(1.8), WD_ALIGN_VERTICAL.CENTER
-                format_cell_advanced(cell, row[card_key], size_pt=16, font_name="Calibri", align="center", color_rgb=NAVY_INK)
-                set_cell_background(cell, base_bg)
-                j += 1
-            for i in remaining_indices:
-                cell = row_cells[j]
-                cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
-                val = _v13_cell_value(i)
-                text_color = (RED_DEEP if i == 6 and is_eligible_zero else
-                              GREEN_DEEP if i == 3 else RED_DEEP if i == 4 else NAVY_INK)
-                if i == 1:
-                    set_cell_no_wrap(cell)
-                    format_name_cell_with_small_suffix(cell, val, base_size=16, small_size=10, font_name="Calibri", bold=True, color_rgb=NAVY, align="left")
-                else:
-                    format_cell_advanced(cell, val, bold=(i in (3, 4)), size_pt=14, font_name="Calibri", color_rgb=text_color, align="left" if i == 1 else "center")
-                set_cell_background(cell, base_bg)
-                j += 1
+            card_sub = f'القديم {row["رقم البطاقة القديم"]} · الحديث {row["رقم البطاقة الحديث"]}'
         else:
-            for target_col, i in enumerate(keep_indices):
-                cell = row_cells[target_col]
-                if i == 0:
-                    _fill_ter_cell(cell, col_widths[i])
-                    continue
-                cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
-                val = _v13_cell_value(i)
-                text_color = (RED_DEEP if i == 6 and is_eligible_zero else
-                              GREEN_DEEP if i == 3 else RED_DEEP if i == 4 else NAVY_INK)
-                if i == 1:
-                    set_cell_no_wrap(cell)
-                    format_name_cell_with_small_suffix(cell, val, base_size=16, small_size=10, font_name="Calibri", bold=True, color_rgb=NAVY, align="left")
-                else:
-                    format_cell_advanced(cell, val, bold=(i in (3, 4)), size_pt=14, font_name="Calibri", color_rgb=text_color, align="left" if i == 1 else "center")
-                set_cell_background(cell, base_bg)
+            card_sub = str(row["رقم البطاقة"])
+
+        for target_col, i in enumerate(keep_indices):
+            cell = row_cells[target_col]
+            cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
+            if i == 0:
+                set_cell_background(cell, accent)
+            elif i == 1:
+                format_cell_advanced(cell, row["ت"], bold=True, size_pt=18, font_name="Calibri", align="center", color_rgb=GHOST)
+                set_cell_background(cell, zebra_bg)
+            elif i == 2:
+                set_cell_no_wrap(cell)
+                _set_name_with_sub(cell, row["اسم رب الأسرة"], card_sub, name_color)
+                set_cell_background(cell, zebra_bg)
+            elif i in (3, 4, 5):
+                val = row["الكلي"] if i == 3 else row["مستحق"] if i == 4 else row["محجوب"]
+                text_color = NAVY if i == 3 else GREEN_DEEP if i == 4 else RED_DEEP
+                format_cell_advanced(cell, val, bold=True, size_pt=14, font_name="Calibri", align="center", color_rgb=text_color)
+                set_cell_background(cell, zebra_bg)
+            else:
+                format_cell_advanced(cell, "⚠ محجوب" if is_eligible_zero else "", bold=True, size_pt=11, font_name="Calibri", align="center", color_rgb=RED_DEEP)
+                set_cell_background(cell, zebra_bg)
 
     return save_doc_buffer(doc, df)
 
@@ -2634,7 +2612,9 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
         page_size = "A4"
         page_orientation = "portrait"
     elif template_choice == "النموذج الثالث عشر (تصميم فاخر عصري)":
-        headers = ["ت"] + card_cols + ["اسم رب الأسرة", "الكلي", "مستحق", "محجوب", "ملاحظات"] if is_combined else ["ت", "اسم رب الأسرة", "الكلي", "مستحق", "محجوب", card_choice, "ملاحظات"]
+        # بلا عمود مستقل لرقم البطاقة: يُدمَج كسطر فرعي صغير تحت الاسم (انظر
+        # فرع القيم أدناه)، فالترويسة تبقى ثابتة بصرف النظر عن card_choice.
+        headers = ["ت", "اسم رب الأسرة", "الكلي", "مستحق", "محجوب", "ملاحظات"]
         page_size = "A4"
         page_orientation = "portrait"
     else:
@@ -2824,27 +2804,31 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
                 ("x" if is_eligible_zero else "", "")
             ]
         elif template_choice == "النموذج الثالث عشر (تصميم فاخر عصري)":
-            ter_badge = f'<span class="ter-badge">{row["ت"]}</span>'
+            # لا شبكة، لا خلايا ملوّنة تقليدية: رقم تسلسل كبير باهت كزخرفة،
+            # رقم البطاقة كسطر فرعي صغير تحت الاسم بدل عمود مستقل، وثلاثية
+            # الكلي/مستحق/محجوب كشرائح مستديرة صغيرة. صف "مستحق=صفر" يُميَّز
+            # بشريط أحمر جانبي عريض + تظليل خفيف + أيقونة تحذير، لا تظليل
+            # كامل صريح كبقية القوالب — انظر التعليق أعلى صنف CSS المقابل.
+            row_bg = "background-color: #FDF1EF;" if is_eligible_zero else ""
+            accent_color = "B02E26" if is_eligible_zero else current_letter_color
+            ter_html = f'<span class="lux-ter">{row["ت"]}</span>'
+            ter_style = f"border-right: 6px solid #{accent_color};"
             if is_combined:
-                vals = [
-                    (ter_badge, ter_bg),
-                    *card_vals,
-                    (display_name, "text-align: right; font-weight: bold; font-size: 14pt; color: #1B3A63;"),
-                    (row["الكلي"], "font-weight: bold; color: #1B3A63;"),
-                    (row["مستحق"], "font-weight: bold; color: #1E7E43;"),
-                    (row["محجوب"], "font-weight: bold; color: #B02E26;"),
-                    ("محجوب" if is_eligible_zero else "", "color: #B02E26; font-weight: bold;" if is_eligible_zero else "")
-                ]
+                card_sub = f'القديم {row["رقم البطاقة القديم"]} · الحديث {row["رقم البطاقة الحديث"]}'
             else:
-                vals = [
-                    (ter_badge, ter_bg),
-                    (display_name, "text-align: right; font-weight: bold; font-size: 14pt; color: #1B3A63;"),
-                    (row["الكلي"], "font-weight: bold; color: #1B3A63;"),
-                    (row["مستحق"], "font-weight: bold; color: #1E7E43;"),
-                    (row["محجوب"], "font-weight: bold; color: #B02E26;"),
-                    *card_vals,
-                    ("محجوب" if is_eligible_zero else "", "color: #B02E26; font-weight: bold;" if is_eligible_zero else "")
-                ]
+                card_sub = str(row["رقم البطاقة"])
+            name_html = (
+                f'<div class="lux-name" style="{"color:#B02E26;" if is_eligible_zero else ""}">{display_name}</div>'
+                f'<div class="lux-sub">{card_sub}</div>'
+            )
+            vals = [
+                (ter_html, ter_style),
+                (name_html, "text-align: right;"),
+                (f'<span class="lux-chip lux-chip-navy">{row["الكلي"]}</span>', ""),
+                (f'<span class="lux-chip lux-chip-green">{row["مستحق"]}</span>', ""),
+                (f'<span class="lux-chip lux-chip-red">{row["محجوب"]}</span>', ""),
+                ('⚠ محجوب' if is_eligible_zero else "", "color: #B02E26; font-weight: 800; font-size: 11pt;" if is_eligible_zero else "")
+            ]
         else:
             vals = [
                 (row["ت"], ter_bg),
@@ -3286,34 +3270,64 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
             table.theme-green td {{
                 border-color: #C8E6C9;
             }}
-            /* النموذج الثالث عشر: لوحة أحادية كحلية/ذهبية راقية بدل الفقاعات
-               الملوّنة المتعددة — رأس كحلي غامق موحّد، تناوب خفيف بدرجة كحلية
-               فاتحة جداً بدل الألوان الصريحة، مع الاحتفاظ بالتحذير الأحمر
-               القوي لصفوف "مستحق=0" لأنه استثناء تشغيلي حقيقي يجب أن يبقى
-               لافتاً. */
-            table.theme-luxury th {{
-                background-color: #0F2A44;
-                color: #FFFFFF;
-                border-color: #1B3A63;
-                font-size: 13pt;
+            /* النموذج الثالث عشر: تصميم "بلا شبكة" جريء ومختلف بنيوياً عن كل
+               القوالب الأخرى (التي تتشارك جميعها شكل الجدول المسطّر الكلاسيكي)
+               — بلا خطوط شبكة رأسية إطلاقاً، رقم تسلسل كبير باهت كخلفية زخرفية،
+               رقم البطاقة يظهر كسطر فرعي صغير تحت الاسم بدل عمود مستقل، وأعمدة
+               الكلي/مستحق/محجوب على شكل "شرائح" مستديرة صغيرة بدل خلايا جدول
+               تقليدية. صف "مستحق=صفر" يُبرَز بشريط أحمر جانبي عريض + تظليل
+               خفيف + أيقونة تحذير، بدل التظليل الكامل الصريح المستخدم بكل
+               القوالب الأخرى.  */
+            table.theme-luxury {{
+                border-collapse: separate;
+                border-spacing: 0;
             }}
-            table.theme-luxury tbody tr:nth-child(even) td {{
-                background-color: #F2F6FB;
+            table.theme-luxury th {{
+                background-color: #FFFFFF;
+                color: #14243B;
+                font-size: 12.5pt;
+                font-weight: 800;
+                border: none;
+                border-bottom: 3px solid #14243B;
+                padding-top: 10px;
+                padding-bottom: 10px;
             }}
             table.theme-luxury td {{
-                border-color: #D7E1EE;
+                border: none;
+                border-bottom: 1px solid #E7EBF2;
+                padding-top: 9px;
+                padding-bottom: 9px;
             }}
-            table.theme-luxury .ter-badge {{
-                display: inline-block;
-                background-color: #C9A227;
-                color: #0F2A44;
+            table.theme-luxury tbody tr:nth-child(even) td {{
+                background-color: #FAFBFD;
+            }}
+            table.theme-luxury .lux-ter {{
+                font-size: 19pt;
                 font-weight: 800;
-                border-radius: 50%;
-                width: 22px;
-                height: 22px;
-                line-height: 22px;
-                text-align: center;
+                color: #C7D2E0;
             }}
+            table.theme-luxury .lux-name {{
+                font-size: 13.5pt;
+                font-weight: 800;
+                color: #14243B;
+            }}
+            table.theme-luxury .lux-sub {{
+                font-size: 9pt;
+                font-weight: 600;
+                color: #8A96A8;
+                margin-top: 2px;
+            }}
+            table.theme-luxury .lux-chip {{
+                display: inline-block;
+                min-width: 30px;
+                padding: 4px 12px;
+                border-radius: 20px;
+                font-weight: 800;
+                font-size: 12pt;
+            }}
+            table.theme-luxury .lux-chip-navy {{ background-color: #EEF3FA; color: #1B3A63; }}
+            table.theme-luxury .lux-chip-green {{ background-color: #E9F7EF; color: #1E7E43; }}
+            table.theme-luxury .lux-chip-red {{ background-color: #FBEAE8; color: #B02E26; }}
             .green-checkbox {{
                 display: inline-block;
                 width: 43px;
@@ -3426,7 +3440,9 @@ def build_excel_report(df, filename_base, card_choice, template_choice, sort_alp
     elif template_choice == "النموذج الثاني عشر (ت، اسم رب الأسرة، المستحق، حقل فارغ)":
         headers = ["ت", "اسم رب الأسرة", "المستحق", "حقل فارغ"]
     elif template_choice == "النموذج الثالث عشر (تصميم فاخر عصري)":
-        headers = ["ت"] + card_cols + ["اسم رب الأسرة", "الكلي", "مستحق", "محجوب", "ملاحظات"] if is_combined else ["ت", "اسم رب الأسرة", "الكلي", "مستحق", "محجوب", card_choice, "ملاحظات"]
+        # رقم البطاقة يظهر كسطر ثانٍ داخل خلية الاسم نفسها (انظر فرع القيم
+        # أدناه)، فلا حاجة لعمود مستقل له هنا.
+        headers = ["ت", "اسم رب الأسرة", "الكلي", "مستحق", "محجوب", "ملاحظات"]
     else:
         headers = ["ت", "اسم رب الأسرة", "عدد الأفراد المستحقة", "حقل كبير فارغ", "حقل كبير فارغ"]
 
@@ -3450,7 +3466,7 @@ def build_excel_report(df, filename_base, card_choice, template_choice, sort_alp
         if is_green_theme:
             return "43A047", "FFFFFF"
         if is_luxury_theme:
-            return "0F2A44", "FFFFFF"
+            return "FFFFFF", "14243B"
         if h == "اطفال":
             return "FDEBD0", "B9770E"
         if "كلي" in h:
@@ -3626,26 +3642,22 @@ def build_excel_report(df, filename_base, card_choice, template_choice, sort_alp
                 ("x" if is_eligible_zero else "", "")
             ]
         elif template_choice == "النموذج الثالث عشر (تصميم فاخر عصري)":
+            # نفس منطق نسخة PDF: رقم البطاقة كسطر ثانٍ داخل خلية الاسم (بفصل
+            # سطري \n مع wrap_text) بدل عمود مستقل.
             if is_combined:
-                vals = [
-                    (row["ت"], ter_bg),
-                    *card_vals,
-                    (display_name, "text-align: right; font-weight: bold; color: #1B3A63;"),
-                    (row["الكلي"], "font-weight: bold; color: #1B3A63;"),
-                    (row["مستحق"], "font-weight: bold; color: #1E7E43;"),
-                    (row["محجوب"], "font-weight: bold; color: #B02E26;"),
-                    ("محجوب" if is_eligible_zero else "", "color: #B02E26; font-weight: bold;" if is_eligible_zero else "")
-                ]
+                card_sub = f'القديم {row["رقم البطاقة القديم"]} · الحديث {row["رقم البطاقة الحديث"]}'
             else:
-                vals = [
-                    (row["ت"], ter_bg),
-                    (display_name, "text-align: right; font-weight: bold; color: #1B3A63;"),
-                    (row["الكلي"], "font-weight: bold; color: #1B3A63;"),
-                    (row["مستحق"], "font-weight: bold; color: #1E7E43;"),
-                    (row["محجوب"], "font-weight: bold; color: #B02E26;"),
-                    *card_vals,
-                    ("محجوب" if is_eligible_zero else "", "color: #B02E26; font-weight: bold;" if is_eligible_zero else "")
-                ]
+                card_sub = str(row["رقم البطاقة"])
+            name_val = f'{row["اسم رب الأسرة"]}\n{card_sub}'
+            name_style = "text-align: right; font-weight: bold; color: #14243B;" + (" color: #B02E26;" if is_eligible_zero else "")
+            vals = [
+                (row["ت"], ter_bg),
+                (name_val, name_style),
+                (row["الكلي"], "font-weight: bold; color: #1B3A63;"),
+                (row["مستحق"], "font-weight: bold; color: #1E7E43;"),
+                (row["محجوب"], "font-weight: bold; color: #B02E26;"),
+                ("⚠ محجوب" if is_eligible_zero else "", "color: #B02E26; font-weight: bold;" if is_eligible_zero else "")
+            ]
         else:
             vals = [
                 (row["ت"], ter_bg),
@@ -3667,7 +3679,7 @@ def build_excel_report(df, filename_base, card_choice, template_choice, sort_alp
             bg, fg, bold, align = _xl_parse_css(combined_style)
             cell = ws.cell(row=excel_row, column=col_idx, value=_xl_val(val))
             cell.border = cell_border
-            cell.alignment = Alignment(horizontal=align or "center", vertical="center")
+            cell.alignment = Alignment(horizontal=align or "center", vertical="center", wrap_text=True)
             if bg:
                 cell.fill = PatternFill("solid", fgColor=bg)
             if fg or bold:
@@ -3801,7 +3813,7 @@ with st.container(border=True):
         "النموذج العاشر (ت، الاسم الرباعي، العدد المستحق، حقل فارغ)": "💡 تصميم مبسّط: تسلسل، الاسم الرباعي، العدد المستحق، وحقل فارغ.",
         "النموذج الحادي عشر (ثيم أخضر: ت، الاسم، المستحق، حقل فارغ)": "💡 نفس التصميم المبسّط بثيم أخضر مميّز.",
         "النموذج الثاني عشر (ت، اسم رب الأسرة، المستحق، حقل فارغ)": "💡 تصميم مبسّط مطابق لسجل التوزيع الورقي التقليدي.",
-        "النموذج الثالث عشر (تصميم فاخر عصري)": "✨ تصميم عصري راقٍ بلوحة كحلية/ذهبية أحادية بدل الألوان المتعددة — الأنسب لمظهر أكثر فخامة.",
+        "النموذج الثالث عشر (تصميم فاخر عصري)": "✨ تصميم جريء بلا شبكة تقليدية: شريط تلوين جانبي، ترقيم كبير باهت، ورقم البطاقة كسطر فرعي تحت الاسم.",
     }
     st.caption(TEMPLATE_HINTS.get(template_choice, ""))
 
