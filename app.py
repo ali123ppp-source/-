@@ -2146,6 +2146,147 @@ def build_professional_word_report_v12(df, filename_base, card_choice, sort_alph
 
     return save_doc_buffer(doc, df)
 
+# --- النموذج الثالث عشر: تصميم فاخر بلوحة ألوان أحادية (كحلي/ذهبي) بديلاً عن
+# الألوان المتعددة الصارخة بالنماذج الأخرى — أثبت بحث اتجاهات 2026 أن لوحة
+# محدودة بعمق تدرّجي واحد تبدو أرقى وأكثر احترافية من مزيج ألوان "قوس قزح"،
+# مع الاحتفاظ بالتحذير الأحمر القوي لحالة "مستحق=0" فقط لأنه استثناء حقيقي
+# يجب أن يبقى لافتاً بصرياً بصرف النظر عن رصانة باقي التصميم.
+def build_professional_word_report_v13(df, filename_base, card_choice, sort_alphabetically=True, visible_totals=None):
+    doc = Document()
+    setup_document_layout(doc, filename_base)
+
+    NAVY_INK = RGBColor(15, 42, 68)
+    NAVY = RGBColor(27, 58, 99)
+    GREEN_DEEP = RGBColor(30, 126, 67)
+    RED_DEEP = RGBColor(176, 46, 38)
+    GOLD = "C9A227"
+    ZEBRA = "F2F6FB"
+    ALERT = "EC7063"
+
+    clean_name = filename_base
+    for w in ["مستكشف", "معدل", "كشف", "منسق", "جاهز", "مدمج", "الترتيب", "الأبجدي", "الابجدي", "أبجدي", "ابجدي"]: clean_name = clean_name.replace(w, " ")
+    clean_name = " ".join(re.sub(r'[a-zA-Z\-_+_.]', ' ', clean_name).split())
+
+    title_p = doc.add_paragraph()
+    title_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    title_run = title_p.add_run(f"الكشف الإحصائي المنسق للوكيل: {clean_name}")
+    title_run.font.name, title_run.font.size, title_run.bold = "Segoe UI Semibold", Pt(14), True
+    title_run.font.color.rgb = NAVY_INK
+
+    is_combined = card_choice == "القديم والحديث"
+    orig_headers = ["ت", "اسم رب الأسرة", "الكلي", "مستحق", "محجوب", card_choice, "ملاحظات"]
+    max_name_len = max(df["اسم رب الأسرة"].astype(str).str.len().max(), 15)
+    dynamic_name_width = Cm(max_name_len * 0.22 + 0.5)
+    col_widths = [Cm(0.9), dynamic_name_width, Cm(1.1), Cm(1.1), Cm(1.1), Cm(1.8), Inches(1.0)]
+    remaining_indices = [1, 2, 3, 4, 6] if is_combined else None
+
+    hidden_orig_indices = {i for i, h in enumerate(orig_headers) if h in _hidden_total_labels(visible_totals)}
+    keep_indices = None
+    if is_combined:
+        remaining_indices = [i for i in remaining_indices if i not in hidden_orig_indices]
+        headers = ["ت", "القديم", "الحديث"] + [orig_headers[i] for i in remaining_indices]
+    else:
+        keep_indices = [i for i in range(len(orig_headers)) if i not in hidden_orig_indices]
+        headers = [orig_headers[i] for i in keep_indices]
+
+    table = doc.add_table(rows=1, cols=len(headers))
+    table.style, table.alignment = 'Table Grid', WD_TABLE_ALIGNMENT.CENTER
+    set_table_borders(table, color_hex="1B3A63")
+    table._tbl.tblPr.append(parse_xml(f'<w:bidiVisual {nsdecls("w")}/>'))
+    table.rows[0]._tr.get_or_add_trPr().append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
+    table.rows[0].height = Inches(0.7)
+
+    def _style_header_cell(cell, title, width):
+        cell.width, cell.vertical_alignment = width, WD_ALIGN_VERTICAL.CENTER
+        format_cell_advanced(cell, title, bold=True, size_pt=13, font_name="Segoe UI Semibold", align="center", color_rgb=RGBColor(255, 255, 255))
+        set_cell_background(cell, "0F2A44")
+
+    if is_combined:
+        hdr_cells = table.rows[0].cells
+        _style_header_cell(hdr_cells[0], "ت", col_widths[0])
+        j = 1
+        for label in ["القديم", "الحديث"]:
+            _style_header_cell(hdr_cells[j], label, Cm(1.8))
+            j += 1
+        for i in remaining_indices:
+            _style_header_cell(hdr_cells[j], orig_headers[i], col_widths[i])
+            j += 1
+    else:
+        for target_col, i in enumerate(keep_indices):
+            _style_header_cell(table.rows[0].cells[target_col], orig_headers[i], col_widths[i])
+
+    prev_letter = None
+    current_letter_color = "D4E6F1"
+    zebra_on = False
+    for idx, row in df.iterrows():
+        if sort_alphabetically:
+            letter = get_name_group_letter(row["اسم رب الأسرة"])
+            if letter != prev_letter:
+                current_letter_color = add_letter_banner_row(table, letter)
+                prev_letter, zebra_on = letter, False
+
+        new_row = table.add_row()
+        new_row.height = Inches(0.5)
+        row_cells = new_row.cells
+        new_row._tr.get_or_add_trPr().append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
+        is_eligible_zero = int(row["مستحق"]) == 0
+        base_bg = ALERT if is_eligible_zero else (ZEBRA if zebra_on else "FFFFFF")
+        zebra_on = not zebra_on
+
+        def _v13_cell_value(i, row=row, is_eligible_zero=is_eligible_zero):
+            if i == 1: return row["اسم رب الأسرة"]
+            if i == 2: return row["الكلي"]
+            if i == 3: return row["مستحق"]
+            if i == 4: return row["محجوب"]
+            if i == 6: return "محجوب" if is_eligible_zero else ""
+            return ""
+
+        def _fill_ter_cell(cell, width):
+            cell.width, cell.vertical_alignment = width, WD_ALIGN_VERTICAL.CENTER
+            format_cell_advanced(cell, row["ت"], bold=True, size_pt=9.6, font_name="Calibri", align="center", color_rgb=NAVY_INK)
+            set_cell_background(cell, ALERT if is_eligible_zero else GOLD)
+
+        if is_combined:
+            _fill_ter_cell(row_cells[0], col_widths[0])
+            j = 1
+            for card_key in ["رقم البطاقة القديم", "رقم البطاقة الحديث"]:
+                cell = row_cells[j]
+                cell.width, cell.vertical_alignment = Cm(1.8), WD_ALIGN_VERTICAL.CENTER
+                format_cell_advanced(cell, row[card_key], size_pt=16, font_name="Calibri", align="center", color_rgb=NAVY_INK)
+                set_cell_background(cell, base_bg)
+                j += 1
+            for i in remaining_indices:
+                cell = row_cells[j]
+                cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
+                val = _v13_cell_value(i)
+                text_color = (RED_DEEP if i == 6 and is_eligible_zero else
+                              GREEN_DEEP if i == 3 else RED_DEEP if i == 4 else NAVY_INK)
+                if i == 1:
+                    set_cell_no_wrap(cell)
+                    format_name_cell_with_small_suffix(cell, val, base_size=16, small_size=10, font_name="Calibri", bold=True, color_rgb=NAVY, align="left")
+                else:
+                    format_cell_advanced(cell, val, bold=(i in (3, 4)), size_pt=14, font_name="Calibri", color_rgb=text_color, align="left" if i == 1 else "center")
+                set_cell_background(cell, base_bg)
+                j += 1
+        else:
+            for target_col, i in enumerate(keep_indices):
+                cell = row_cells[target_col]
+                if i == 0:
+                    _fill_ter_cell(cell, col_widths[i])
+                    continue
+                cell.width, cell.vertical_alignment = col_widths[i], WD_ALIGN_VERTICAL.CENTER
+                val = _v13_cell_value(i)
+                text_color = (RED_DEEP if i == 6 and is_eligible_zero else
+                              GREEN_DEEP if i == 3 else RED_DEEP if i == 4 else NAVY_INK)
+                if i == 1:
+                    set_cell_no_wrap(cell)
+                    format_name_cell_with_small_suffix(cell, val, base_size=16, small_size=10, font_name="Calibri", bold=True, color_rgb=NAVY, align="left")
+                else:
+                    format_cell_advanced(cell, val, bold=(i in (3, 4)), size_pt=14, font_name="Calibri", color_rgb=text_color, align="left" if i == 1 else "center")
+                set_cell_background(cell, base_bg)
+
+    return save_doc_buffer(doc, df)
+
 # --- الدالة الجديدة للنموذج السابع (تفاصيل المواد) ---
 def build_professional_word_report_v7(df, filename_base, card_choice, sort_alphabetically=True, visible_totals=None):
     doc = Document()
@@ -2442,9 +2583,10 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
     # 100% — جدول مسطّح بلا خلفية منقّطة وبلا إطار بطاقة ملّون، بدل الشكل
     # المشترك المستخدم بباقي القوالب.
     is_green_theme = template_choice == "النموذج الحادي عشر (ثيم أخضر: ت، الاسم، المستحق، حقل فارغ)"
-    body_bg_image_css = "none" if is_green_theme else "radial-gradient(circle, #DCE4F0 1px, transparent 1px)"
-    body_bg_size_css = "0 0" if is_green_theme else "16px 16px"
-    card_border_css = "1.5px solid #A5D6A7" if is_green_theme else "2.5px solid #1B3A63"
+    is_luxury_theme = template_choice == "النموذج الثالث عشر (تصميم فاخر عصري)"
+    body_bg_image_css = "none" if (is_green_theme or is_luxury_theme) else "radial-gradient(circle, #DCE4F0 1px, transparent 1px)"
+    body_bg_size_css = "0 0" if (is_green_theme or is_luxury_theme) else "16px 16px"
+    card_border_css = "1.5px solid #A5D6A7" if is_green_theme else ("1.5px solid #C9A227" if is_luxury_theme else "2.5px solid #1B3A63")
     card_radius_css = "14px" if is_green_theme else "20px"
 
     total_all = df["الكلي"].astype(int).sum()
@@ -2489,6 +2631,10 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
         page_orientation = "portrait"
     elif template_choice == "النموذج الثاني عشر (ت، اسم رب الأسرة، المستحق، حقل فارغ)":
         headers = ["ت", "اسم رب الأسرة", "المستحق", "حقل فارغ"]
+        page_size = "A4"
+        page_orientation = "portrait"
+    elif template_choice == "النموذج الثالث عشر (تصميم فاخر عصري)":
+        headers = ["ت"] + card_cols + ["اسم رب الأسرة", "الكلي", "مستحق", "محجوب", "ملاحظات"] if is_combined else ["ت", "اسم رب الأسرة", "الكلي", "مستحق", "محجوب", card_choice, "ملاحظات"]
         page_size = "A4"
         page_orientation = "portrait"
     else:
@@ -2677,6 +2823,28 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
                 (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
                 ("x" if is_eligible_zero else "", "")
             ]
+        elif template_choice == "النموذج الثالث عشر (تصميم فاخر عصري)":
+            ter_badge = f'<span class="ter-badge">{row["ت"]}</span>'
+            if is_combined:
+                vals = [
+                    (ter_badge, ter_bg),
+                    *card_vals,
+                    (display_name, "text-align: right; font-weight: bold; font-size: 14pt; color: #1B3A63;"),
+                    (row["الكلي"], "font-weight: bold; color: #1B3A63;"),
+                    (row["مستحق"], "font-weight: bold; color: #1E7E43;"),
+                    (row["محجوب"], "font-weight: bold; color: #B02E26;"),
+                    ("محجوب" if is_eligible_zero else "", "color: #B02E26; font-weight: bold;" if is_eligible_zero else "")
+                ]
+            else:
+                vals = [
+                    (ter_badge, ter_bg),
+                    (display_name, "text-align: right; font-weight: bold; font-size: 14pt; color: #1B3A63;"),
+                    (row["الكلي"], "font-weight: bold; color: #1B3A63;"),
+                    (row["مستحق"], "font-weight: bold; color: #1E7E43;"),
+                    (row["محجوب"], "font-weight: bold; color: #B02E26;"),
+                    *card_vals,
+                    ("محجوب" if is_eligible_zero else "", "color: #B02E26; font-weight: bold;" if is_eligible_zero else "")
+                ]
         else:
             vals = [
                 (row["ت"], ter_bg),
@@ -2715,10 +2883,13 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
 
     def _header_cell_html(h, extra_style=""):
         style_attr = f' style="{extra_style}"' if extra_style else ""
-        if is_green_theme:
+        if is_green_theme or is_luxury_theme:
             # طلب صريح: يطابق تصميم الصورة المرجعية — عنوان نصي عادي أبيض
             # غامق على الخلفية الخضراء مباشرة، بلا شارة/فقاعة ملوّنة (التي
-            # تفيض أصلاً مع خط Aref Ruqaa العريض).
+            # تفيض أصلاً مع خط Aref Ruqaa العريض). النموذج الفاخر (13) يتبع
+            # نفس المنطق عمداً: لوحة أحادية كحلية/ذهبية بلا فقاعات متعددة
+            # الألوان، بحسب اتجاهات التصميم الحديثة (بحث 2026) التي تفضّل
+            # التدرّج بعمق لون واحد على مزيج "قوس قزح" من الألوان.
             return f'<th{style_attr}>{h}</th>'
         pill_extra = " pill-tight" if use_compact_columns else ""
         if h == "اطفال":
@@ -2771,6 +2942,8 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
     colgroup_html = ""
     if template_choice == "النموذج الحادي عشر (ثيم أخضر: ت، الاسم، المستحق، حقل فارغ)":
         table_class = "theme-green"
+    if is_luxury_theme:
+        table_class = "theme-luxury"
     if use_compact_columns:
         table_class = (table_class + " compact").strip()
         critical = [_critical_pct(h) for h in headers]
@@ -2944,7 +3117,7 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
                 height: 100%;
                 min-height: 261mm;
                 background: #FFFFFF;
-                border: 2.5px solid #1B3A63;
+                border: {"2.5px solid #C9A227" if is_luxury_theme else "2.5px solid #1B3A63"};
                 border-radius: 22px;
                 padding: 14mm 16mm;
                 box-sizing: border-box;
@@ -3113,6 +3286,34 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
             table.theme-green td {{
                 border-color: #C8E6C9;
             }}
+            /* النموذج الثالث عشر: لوحة أحادية كحلية/ذهبية راقية بدل الفقاعات
+               الملوّنة المتعددة — رأس كحلي غامق موحّد، تناوب خفيف بدرجة كحلية
+               فاتحة جداً بدل الألوان الصريحة، مع الاحتفاظ بالتحذير الأحمر
+               القوي لصفوف "مستحق=0" لأنه استثناء تشغيلي حقيقي يجب أن يبقى
+               لافتاً. */
+            table.theme-luxury th {{
+                background-color: #0F2A44;
+                color: #FFFFFF;
+                border-color: #1B3A63;
+                font-size: 13pt;
+            }}
+            table.theme-luxury tbody tr:nth-child(even) td {{
+                background-color: #F2F6FB;
+            }}
+            table.theme-luxury td {{
+                border-color: #D7E1EE;
+            }}
+            table.theme-luxury .ter-badge {{
+                display: inline-block;
+                background-color: #C9A227;
+                color: #0F2A44;
+                font-weight: 800;
+                border-radius: 50%;
+                width: 22px;
+                height: 22px;
+                line-height: 22px;
+                text-align: center;
+            }}
             .green-checkbox {{
                 display: inline-block;
                 width: 43px;
@@ -3197,6 +3398,7 @@ def build_excel_report(df, filename_base, card_choice, template_choice, sort_alp
     نفس ترويسة وقيم/تنسيق كل قالب الموجودة أعلى بدالة _build_report_html_doc
     حتى تتطابق النتيجتان تماماً بلا أي فرق."""
     is_green_theme = template_choice == "النموذج الحادي عشر (ثيم أخضر: ت، الاسم، المستحق، حقل فارغ)"
+    is_luxury_theme = template_choice == "النموذج الثالث عشر (تصميم فاخر عصري)"
     is_combined = card_choice == "القديم والحديث"
     card_cols = ["القديم", "الحديث"] if is_combined else [card_choice]
     show_children = "اطفال" in df.columns
@@ -3223,6 +3425,8 @@ def build_excel_report(df, filename_base, card_choice, template_choice, sort_alp
         headers = ["ت", "الاسم", "المستحق", "حقل فارغ"]
     elif template_choice == "النموذج الثاني عشر (ت، اسم رب الأسرة، المستحق، حقل فارغ)":
         headers = ["ت", "اسم رب الأسرة", "المستحق", "حقل فارغ"]
+    elif template_choice == "النموذج الثالث عشر (تصميم فاخر عصري)":
+        headers = ["ت"] + card_cols + ["اسم رب الأسرة", "الكلي", "مستحق", "محجوب", "ملاحظات"] if is_combined else ["ت", "اسم رب الأسرة", "الكلي", "مستحق", "محجوب", card_choice, "ملاحظات"]
     else:
         headers = ["ت", "اسم رب الأسرة", "عدد الأفراد المستحقة", "حقل كبير فارغ", "حقل كبير فارغ"]
 
@@ -3245,6 +3449,8 @@ def build_excel_report(df, filename_base, card_choice, template_choice, sort_alp
     def header_colors(h):
         if is_green_theme:
             return "43A047", "FFFFFF"
+        if is_luxury_theme:
+            return "0F2A44", "FFFFFF"
         if h == "اطفال":
             return "FDEBD0", "B9770E"
         if "كلي" in h:
@@ -3419,6 +3625,27 @@ def build_excel_report(df, filename_base, card_choice, template_choice, sort_alp
                 (row["مستحق"], "background-color: #E8F8F5;" if not is_eligible_zero else ""),
                 ("x" if is_eligible_zero else "", "")
             ]
+        elif template_choice == "النموذج الثالث عشر (تصميم فاخر عصري)":
+            if is_combined:
+                vals = [
+                    (row["ت"], ter_bg),
+                    *card_vals,
+                    (display_name, "text-align: right; font-weight: bold; color: #1B3A63;"),
+                    (row["الكلي"], "font-weight: bold; color: #1B3A63;"),
+                    (row["مستحق"], "font-weight: bold; color: #1E7E43;"),
+                    (row["محجوب"], "font-weight: bold; color: #B02E26;"),
+                    ("محجوب" if is_eligible_zero else "", "color: #B02E26; font-weight: bold;" if is_eligible_zero else "")
+                ]
+            else:
+                vals = [
+                    (row["ت"], ter_bg),
+                    (display_name, "text-align: right; font-weight: bold; color: #1B3A63;"),
+                    (row["الكلي"], "font-weight: bold; color: #1B3A63;"),
+                    (row["مستحق"], "font-weight: bold; color: #1E7E43;"),
+                    (row["محجوب"], "font-weight: bold; color: #B02E26;"),
+                    *card_vals,
+                    ("محجوب" if is_eligible_zero else "", "color: #B02E26; font-weight: bold;" if is_eligible_zero else "")
+                ]
         else:
             vals = [
                 (row["ت"], ter_bg),
@@ -3555,7 +3782,8 @@ with st.container(border=True):
             "النموذج التاسع (توزيع مواد غذائية، بدون رقم بطاقة)",
             "النموذج العاشر (ت، الاسم الرباعي، العدد المستحق، حقل فارغ)",
             "النموذج الحادي عشر (ثيم أخضر: ت، الاسم، المستحق، حقل فارغ)",
-            "النموذج الثاني عشر (ت، اسم رب الأسرة، المستحق، حقل فارغ)"
+            "النموذج الثاني عشر (ت، اسم رب الأسرة، المستحق، حقل فارغ)",
+            "النموذج الثالث عشر (تصميم فاخر عصري)"
         ],
         index=0
     )
@@ -3573,6 +3801,7 @@ with st.container(border=True):
         "النموذج العاشر (ت، الاسم الرباعي، العدد المستحق، حقل فارغ)": "💡 تصميم مبسّط: تسلسل، الاسم الرباعي، العدد المستحق، وحقل فارغ.",
         "النموذج الحادي عشر (ثيم أخضر: ت، الاسم، المستحق، حقل فارغ)": "💡 نفس التصميم المبسّط بثيم أخضر مميّز.",
         "النموذج الثاني عشر (ت، اسم رب الأسرة، المستحق، حقل فارغ)": "💡 تصميم مبسّط مطابق لسجل التوزيع الورقي التقليدي.",
+        "النموذج الثالث عشر (تصميم فاخر عصري)": "✨ تصميم عصري راقٍ بلوحة كحلية/ذهبية أحادية بدل الألوان المتعددة — الأنسب لمظهر أكثر فخامة.",
     }
     st.caption(TEMPLATE_HINTS.get(template_choice, ""))
 
@@ -3724,6 +3953,8 @@ if st.session_state.processing_done:
             return build_professional_word_report_v11(df_final, output_filename, used_card_type, used_sort_alphabetically, used_visible_totals)
         elif used_template == "النموذج الثاني عشر (ت، اسم رب الأسرة، المستحق، حقل فارغ)":
             return build_professional_word_report_v12(df_final, output_filename, used_card_type, used_sort_alphabetically, used_visible_totals)
+        elif used_template == "النموذج الثالث عشر (تصميم فاخر عصري)":
+            return build_professional_word_report_v13(df_final, output_filename, used_card_type, used_sort_alphabetically, used_visible_totals)
         else:
             return build_professional_word_report_v5(df_final, output_filename, used_card_type, used_sort_alphabetically, used_visible_totals)
 
