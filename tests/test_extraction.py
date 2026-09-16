@@ -42,7 +42,7 @@ def _install_streamlit_stub():
     for fn in ["markdown", "file_uploader", "radio", "button", "success", "error",
                "warning", "download_button", "dataframe", "write", "set_page_config",
                "checkbox", "text_input", "selectbox", "info", "stop", "title",
-               "header", "subheader"]:
+               "header", "subheader", "caption"]:
         setattr(st_stub, fn, _noop)
     st_stub.columns = lambda n, **k: [_Ctx() for _ in range(n if isinstance(n, int) else len(n))]
     st_stub.expander = lambda *a, **k: _Ctx()

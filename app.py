@@ -31,28 +31,89 @@ except Exception:
     PDFKIT_AVAILABLE = False
 
 # إعدادات واجهة المستخدم
-st.set_page_config(page_title="نظام تنسيق وتدقيق كشوفات الوكلاء", layout="wide")
+st.set_page_config(page_title="نظام تنسيق وتدقيق كشوفات الوكلاء", layout="wide", page_icon="📄")
 st.markdown("""
     <style>
-    th, td { text-align: right !important; dir: rtl !important; }
-    div.stButton > button {
-        background-color: #1B3A63; color: white; width: 100%; font-weight: bold;
-        border-radius: 10px; font-size: 18px; padding: 0.6em 0; border: none;
-        transition: background-color 0.15s ease;
+    @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap');
+
+    html, body, .stApp, .stMarkdown p, .stMarkdown span, .stMarkdown div,
+    label, h1, h2, h3, h4, [data-testid="stWidgetLabel"], [data-testid="stCaptionContainer"] {
+        font-family: 'Cairo', 'Segoe UI', sans-serif;
     }
-    div.stButton > button:hover { background-color: #2E4053; color: white; }
+    th, td { text-align: right !important; dir: rtl !important; }
+
+    .stApp { background-color: #F7F9FC; }
+
+    /* شريط علوي زخرفي بلون العلامة التجارية */
+    .stApp::before {
+        content: ""; position: fixed; top: 0; left: 0; right: 0; height: 6px;
+        background: linear-gradient(90deg, #1B3A63 0%, #2E6FA7 55%, #C9A227 100%);
+        z-index: 999;
+    }
+
+    .hero-banner {
+        background: linear-gradient(135deg, #16294A 0%, #1B3A63 55%, #2E5C8A 100%);
+        border-radius: 18px; padding: 28px 32px; margin: 10px 0 22px 0;
+        box-shadow: 0 8px 22px rgba(27,58,99,0.25);
+        text-align: right; position: relative; overflow: hidden;
+    }
+    .hero-banner h1 {
+        color: #FFFFFF; font-size: 28px; font-weight: 800; margin: 0 0 6px 0;
+    }
+    .hero-banner .hero-sub {
+        color: #CBD9EC; font-size: 15px; font-weight: 400; margin: 0;
+    }
+    .hero-banner .hero-badge {
+        position: absolute; left: 28px; top: 50%; transform: translateY(-50%);
+        font-size: 44px; opacity: 0.9;
+    }
+
+    div.stButton > button {
+        background: linear-gradient(90deg, #1B3A63 0%, #2E6FA7 100%);
+        color: white; width: 100%; font-weight: 700;
+        border-radius: 12px; font-size: 18px; padding: 0.7em 0; border: none;
+        box-shadow: 0 4px 12px rgba(27,58,99,0.28);
+        transition: all 0.18s ease;
+    }
+    div.stButton > button:hover {
+        background: linear-gradient(90deg, #16294A 0%, #1B3A63 100%);
+        color: white; transform: translateY(-1px);
+        box-shadow: 0 6px 16px rgba(27,58,99,0.38);
+    }
+
     .report-box { background-color: #F4F6F7; padding: 15px; border-radius: 8px; border-right: 5px solid #2E4053; text-align: right; margin-bottom: 10px;}
     div.row-widget.stRadio > div { flex-direction: row-reverse; justify-content: flex-start; gap: 20px; }
-    .app-subtitle { text-align: right; color: #7A8AA3; font-size: 15px; margin-top: -8px; margin-bottom: 18px; }
+
     .section-title {
-        text-align: right; color: #1B3A63; font-size: 19px; font-weight: 700;
-        border-right: 4px solid #1B3A63; padding-right: 10px; margin: 6px 0 12px 0;
+        display: flex; align-items: center; justify-content: flex-end; gap: 10px;
+        background: linear-gradient(90deg, #1B3A63 0%, #2E5C8A 100%);
+        color: #FFFFFF; font-size: 16px; font-weight: 700; text-align: right;
+        border-radius: 10px; padding: 10px 16px; margin: 22px 0 10px 0;
+        box-shadow: 0 3px 8px rgba(27,58,99,0.18);
     }
+    .section-title .badge-num {
+        display: inline-flex; align-items: center; justify-content: center;
+        background-color: #C9A227; color: #16294A; font-weight: 800; font-size: 13px;
+        width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0;
+    }
+
+    .info-pill {
+        display: inline-block; background-color: #EAF6EE; color: #1E7E43;
+        border-radius: 20px; padding: 5px 14px; font-size: 14px; font-weight: 600;
+        margin-top: 6px;
+    }
+
+    div[data-testid="stExpander"] { border-radius: 10px !important; }
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown("<h1 style='text-align: right;'>نظام تنسيق وتدقيق كشوفات الوكلاء المطور 📄💎</h1>", unsafe_allow_html=True)
-st.markdown("<div class='app-subtitle'>ارفع الكشف، اختر خياراتك، واحصل على نسخة منسّقة جاهزة للطباعة بصيغة Word أو PDF أو Excel.</div>", unsafe_allow_html=True)
+st.markdown("""
+    <div class="hero-banner">
+        <div class="hero-badge">📄💎</div>
+        <h1>نظام تنسيق وتدقيق كشوفات الوكلاء المطور</h1>
+        <p class="hero-sub">ارفع الكشف، اختر خياراتك، واحصل على نسخة منسّقة جاهزة للطباعة بصيغة Word أو PDF أو Excel.</p>
+    </div>
+""", unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
 # سجل الملفات المعالجة (لعرضها لاحقاً كجدول ديناميكي، الأحدث أولاً)
@@ -3433,9 +3494,11 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
 # -----------------------------------------------------------------------------
 # واجهة استخدام التطبيق (Streamlit Interface)
 # -----------------------------------------------------------------------------
-st.markdown("<div class='section-title'>📂 رفع الملف</div>", unsafe_allow_html=True)
+st.markdown("<div class='section-title'>📂 رفع الملف<span class='badge-num'>1</span></div>", unsafe_allow_html=True)
 with st.container(border=True):
     uploaded_files = st.file_uploader("ارفع كشف الوكلاء (يمكنك رفع أكثر من ملف)", type=['docx', 'xlsx'], accept_multiple_files=True, key="doc_input_v8", label_visibility="collapsed")
+    if uploaded_files:
+        st.markdown(f"<span class='info-pill'>✅ {len(uploaded_files)} ملف جاهز للمعالجة</span>", unsafe_allow_html=True)
     merge_choice = st.radio(
         "📎 عند رفع أكثر من ملف:",
         ["معالجة كل ملف بشكل منفرد", "دمج كل الملفات في ملف واحد وترتيبها"],
@@ -3444,7 +3507,7 @@ with st.container(border=True):
     )
     merge_files = (merge_choice == "دمج كل الملفات في ملف واحد وترتيبها")
 
-st.markdown("<div class='section-title'>🧾 خيارات الاستخراج والترتيب</div>", unsafe_allow_html=True)
+st.markdown("<div class='section-title'>🧾 خيارات الاستخراج والترتيب<span class='badge-num'>2</span></div>", unsafe_allow_html=True)
 with st.container(border=True):
     col1, col2 = st.columns(2)
     with col1:
@@ -3476,7 +3539,7 @@ with st.container(border=True):
     sort_alphabetically = (sort_choice != SORT_KEEP_ORIGINAL) and not sort_by_card_only
     sort_by_card_within_group = (sort_choice == SORT_ALPHA_WITH_OLD_CARD)
 
-st.markdown("<div class='section-title'>🎨 القالب والمحتوى الظاهر بالملف</div>", unsafe_allow_html=True)
+st.markdown("<div class='section-title'>🎨 القالب والمحتوى الظاهر بالملف<span class='badge-num'>3</span></div>", unsafe_allow_html=True)
 with st.container(border=True):
     template_choice = st.selectbox(
         "اختر نموذج قالب الـ Word المطلوب:",
@@ -3496,6 +3559,22 @@ with st.container(border=True):
         ],
         index=0
     )
+
+    TEMPLATE_HINTS = {
+        "النموذج الأول (الأصلي المطور)": "💡 التصميم الأساسي المعتمد للاستخدام العام — يناسب أغلب الحالات.",
+        "النموذج الثاني (حجم 14 وحقلين فارغين)": "💡 نفس التصميم الأساسي بخط أكبر (14) وحقلين فارغين إضافيين.",
+        "النموذج الثالث (خط 16، عناوين 12، 4 أشهر)": "💡 خط أكبر (16) مع أربعة أعمدة أشهر إضافية للتوزيع الدوري.",
+        "النموذج الرابع (12 سلة، العدد الكلي)": "💡 مخصص لتوزيع 12 سلة غذائية، معتمداً على العدد الكلي للأفراد.",
+        "النموذج الخامس (ورقة A3، حقول كبيرة، خط Uighur)": "💡 ورقة A3 بحقول كبيرة وخط Uighur — يناسب الطباعة على ورق أكبر.",
+        "النموذج السادس (12 سلة، العدد المستحق)": "💡 نفس توزيع 12 سلة، لكن باعتماد العدد المستحق فقط.",
+        "النموذج السابع (تفصيل المواد الغذائية)": "💡 يعرض تفصيل كل مادة غذائية (سكر، زيت، طحين...) بعمود مستقل.",
+        "النموذج الثامن (8 سلات، العدد المستحق)": "💡 توزيع 8 سلال غذائية باعتماد العدد المستحق.",
+        "النموذج التاسع (توزيع مواد غذائية، بدون رقم بطاقة)": "💡 لملفات توزيع المواد الغذائية التي لا تحتوي رقم بطاقة أصلاً.",
+        "النموذج العاشر (ت، الاسم الرباعي، العدد المستحق، حقل فارغ)": "💡 تصميم مبسّط: تسلسل، الاسم الرباعي، العدد المستحق، وحقل فارغ.",
+        "النموذج الحادي عشر (ثيم أخضر: ت، الاسم، المستحق، حقل فارغ)": "💡 نفس التصميم المبسّط بثيم أخضر مميّز.",
+        "النموذج الثاني عشر (ت، اسم رب الأسرة، المستحق، حقل فارغ)": "💡 تصميم مبسّط مطابق لسجل التوزيع الورقي التقليدي.",
+    }
+    st.caption(TEMPLATE_HINTS.get(template_choice, ""))
 
     st.markdown("**📋 ماذا تريد أن يظهر داخل الملف؟** (اختر عموداً واحداً أو أكثر — تنطبق على كل النماذج الـ11)")
     tot_col1, tot_col2, tot_col3 = st.columns(3)
