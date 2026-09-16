@@ -31,17 +31,89 @@ except Exception:
     PDFKIT_AVAILABLE = False
 
 # إعدادات واجهة المستخدم
-st.set_page_config(page_title="نظام تنسيق وتدقيق كشوفات الوكلاء", layout="wide")
+st.set_page_config(page_title="نظام تنسيق وتدقيق كشوفات الوكلاء", layout="wide", page_icon="📄")
 st.markdown("""
     <style>
+    @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap');
+
+    html, body, .stApp, .stMarkdown p, .stMarkdown span, .stMarkdown div,
+    label, h1, h2, h3, h4, [data-testid="stWidgetLabel"], [data-testid="stCaptionContainer"] {
+        font-family: 'Cairo', 'Segoe UI', sans-serif;
+    }
     th, td { text-align: right !important; dir: rtl !important; }
-    div.stButton > button { background-color: #2E4053; color: white; width: 100%; font-weight: bold; border-radius: 8px; font-size: 18px;}
+
+    .stApp { background-color: #F7F9FC; }
+
+    /* شريط علوي زخرفي بلون العلامة التجارية */
+    .stApp::before {
+        content: ""; position: fixed; top: 0; left: 0; right: 0; height: 6px;
+        background: linear-gradient(90deg, #1B3A63 0%, #2E6FA7 55%, #C9A227 100%);
+        z-index: 999;
+    }
+
+    .hero-banner {
+        background: linear-gradient(135deg, #16294A 0%, #1B3A63 55%, #2E5C8A 100%);
+        border-radius: 18px; padding: 28px 32px; margin: 10px 0 22px 0;
+        box-shadow: 0 8px 22px rgba(27,58,99,0.25);
+        text-align: right; position: relative; overflow: hidden;
+    }
+    .hero-banner h1 {
+        color: #FFFFFF; font-size: 28px; font-weight: 800; margin: 0 0 6px 0;
+    }
+    .hero-banner .hero-sub {
+        color: #CBD9EC; font-size: 15px; font-weight: 400; margin: 0;
+    }
+    .hero-banner .hero-badge {
+        position: absolute; left: 28px; top: 50%; transform: translateY(-50%);
+        font-size: 44px; opacity: 0.9;
+    }
+
+    div.stButton > button {
+        background: linear-gradient(90deg, #1B3A63 0%, #2E6FA7 100%);
+        color: white; width: 100%; font-weight: 700;
+        border-radius: 12px; font-size: 18px; padding: 0.7em 0; border: none;
+        box-shadow: 0 4px 12px rgba(27,58,99,0.28);
+        transition: all 0.18s ease;
+    }
+    div.stButton > button:hover {
+        background: linear-gradient(90deg, #16294A 0%, #1B3A63 100%);
+        color: white; transform: translateY(-1px);
+        box-shadow: 0 6px 16px rgba(27,58,99,0.38);
+    }
+
     .report-box { background-color: #F4F6F7; padding: 15px; border-radius: 8px; border-right: 5px solid #2E4053; text-align: right; margin-bottom: 10px;}
     div.row-widget.stRadio > div { flex-direction: row-reverse; justify-content: flex-start; gap: 20px; }
+
+    .section-title {
+        display: flex; align-items: center; justify-content: flex-end; gap: 10px;
+        background: linear-gradient(90deg, #1B3A63 0%, #2E5C8A 100%);
+        color: #FFFFFF; font-size: 16px; font-weight: 700; text-align: right;
+        border-radius: 10px; padding: 10px 16px; margin: 22px 0 10px 0;
+        box-shadow: 0 3px 8px rgba(27,58,99,0.18);
+    }
+    .section-title .badge-num {
+        display: inline-flex; align-items: center; justify-content: center;
+        background-color: #C9A227; color: #16294A; font-weight: 800; font-size: 13px;
+        width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0;
+    }
+
+    .info-pill {
+        display: inline-block; background-color: #EAF6EE; color: #1E7E43;
+        border-radius: 20px; padding: 5px 14px; font-size: 14px; font-weight: 600;
+        margin-top: 6px;
+    }
+
+    div[data-testid="stExpander"] { border-radius: 10px !important; }
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown("<h1 style='text-align: right;'>نظام تنسيق وتدقيق كشوفات الوكلاء المطور 📄💎</h1>", unsafe_allow_html=True)
+st.markdown("""
+    <div class="hero-banner">
+        <div class="hero-badge">📄💎</div>
+        <h1>نظام تنسيق وتدقيق كشوفات الوكلاء المطور</h1>
+        <p class="hero-sub">ارفع الكشف، اختر خياراتك، واحصل على نسخة منسّقة جاهزة للطباعة بصيغة Word أو PDF أو Excel.</p>
+    </div>
+""", unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
 # سجل الملفات المعالجة (لعرضها لاحقاً كجدول ديناميكي، الأحدث أولاً)
@@ -3422,42 +3494,57 @@ def build_pdf_report(df, filename_base, card_choice, template_choice, sort_alpha
 # -----------------------------------------------------------------------------
 # واجهة استخدام التطبيق (Streamlit Interface)
 # -----------------------------------------------------------------------------
-st.markdown("<h3 style='text-align: right;'>📂 رفع الكشف المراد تدقيقه وتنسيقه للمطبعة</h3>", unsafe_allow_html=True)
-uploaded_files = st.file_uploader("ارفع كشف الوكلاء (يمكنك رفع أكثر من ملف)", type=['docx', 'xlsx'], accept_multiple_files=True, key="doc_input_v8", label_visibility="collapsed")
-
-merge_choice = st.radio(
-    "📎 عند رفع أكثر من ملف:",
-    ["معالجة كل ملف بشكل منفرد", "دمج كل الملفات في ملف واحد وترتيبها"],
-    index=0,
-    horizontal=True
-)
-merge_files = (merge_choice == "دمج كل الملفات في ملف واحد وترتيبها")
-
-st.markdown("<br>", unsafe_allow_html=True)
-
-col1, col2, col3 = st.columns([1, 1, 2])
-
-with col1:
-    selected_card = st.radio(
-        "📄 اختر نوع رقم البطاقة:",
-        ["رقم البطاقة القديم", "رقم البطاقة الحديث", "القديم والحديث"],
+st.markdown("<div class='section-title'>📂 رفع الملف<span class='badge-num'>1</span></div>", unsafe_allow_html=True)
+with st.container(border=True):
+    uploaded_files = st.file_uploader("ارفع كشف الوكلاء (يمكنك رفع أكثر من ملف)", type=['docx', 'xlsx'], accept_multiple_files=True, key="doc_input_v8", label_visibility="collapsed")
+    if uploaded_files:
+        st.markdown(f"<span class='info-pill'>✅ {len(uploaded_files)} ملف جاهز للمعالجة</span>", unsafe_allow_html=True)
+    merge_choice = st.radio(
+        "📎 عند رفع أكثر من ملف:",
+        ["معالجة كل ملف بشكل منفرد", "دمج كل الملفات في ملف واحد وترتيبها"],
         index=0,
-        horizontal=False
+        horizontal=True
     )
+    merge_files = (merge_choice == "دمج كل الملفات في ملف واحد وترتيبها")
 
-with col2:
-    name_length_choice = st.radio(
-        "👤 طول اسم رب الأسرة:",
-        ["الاسم الثلاثي فقط", "الاسم الرباعي (إن وجد)"],
+st.markdown("<div class='section-title'>🧾 خيارات الاستخراج والترتيب<span class='badge-num'>2</span></div>", unsafe_allow_html=True)
+with st.container(border=True):
+    col1, col2 = st.columns(2)
+    with col1:
+        selected_card = st.radio(
+            "📄 اختر نوع رقم البطاقة:",
+            ["رقم البطاقة القديم", "رقم البطاقة الحديث", "القديم والحديث"],
+            index=0,
+            horizontal=False
+        )
+    with col2:
+        name_length_choice = st.radio(
+            "👤 طول اسم رب الأسرة:",
+            ["الاسم الثلاثي فقط", "الاسم الرباعي (إن وجد)"],
+            index=0,
+            horizontal=False
+        )
+
+    SORT_KEEP_ORIGINAL = "الحفاظ على ترتيب الملف الأصلي (بدون ترتيب أبجدي)"
+    SORT_ALPHA_WITH_OLD_CARD = "ترتيب أبجدي بحسب الاسم مع رقم البطاقة القديم تصاعدياً داخل كل حرف"
+    SORT_CARD_ONLY = "ترتيب تصاعدي حسب رقم البطاقة القديم فقط (من الأصغر إلى الأكبر)"
+
+    sort_choice = st.radio(
+        "🔤 ترتيب بيانات الجدول:",
+        ["ترتيب أبجدي بحسب الاسم", SORT_ALPHA_WITH_OLD_CARD, SORT_CARD_ONLY, SORT_KEEP_ORIGINAL],
         index=0,
-        horizontal=False
+        horizontal=True
     )
+    sort_by_card_only = (sort_choice == SORT_CARD_ONLY)
+    sort_alphabetically = (sort_choice != SORT_KEEP_ORIGINAL) and not sort_by_card_only
+    sort_by_card_within_group = (sort_choice == SORT_ALPHA_WITH_OLD_CARD)
 
-with col3:
-    template_choice = st.radio(
-        "🎨 اختر نموذج قالب الـ Word المطلوب:",
+st.markdown("<div class='section-title'>🎨 القالب والمحتوى الظاهر بالملف<span class='badge-num'>3</span></div>", unsafe_allow_html=True)
+with st.container(border=True):
+    template_choice = st.selectbox(
+        "اختر نموذج قالب الـ Word المطلوب:",
         [
-            "النموذج الأول (الأصلي المطور)", 
+            "النموذج الأول (الأصلي المطور)",
             "النموذج الثاني (حجم 14 وحقلين فارغين)",
             "النموذج الثالث (خط 16، عناوين 12، 4 أشهر)",
             "النموذج الرابع (12 سلة، العدد الكلي)",
@@ -3470,50 +3557,54 @@ with col3:
             "النموذج الحادي عشر (ثيم أخضر: ت، الاسم، المستحق، حقل فارغ)",
             "النموذج الثاني عشر (ت، اسم رب الأسرة، المستحق، حقل فارغ)"
         ],
-        index=0,
-        horizontal=False
+        index=0
     )
 
-SORT_KEEP_ORIGINAL = "الحفاظ على ترتيب الملف الأصلي (بدون ترتيب أبجدي)"
-SORT_ALPHA_WITH_OLD_CARD = "ترتيب أبجدي بحسب الاسم مع رقم البطاقة القديم تصاعدياً داخل كل حرف"
-SORT_CARD_ONLY = "ترتيب تصاعدي حسب رقم البطاقة القديم فقط (من الأصغر إلى الأكبر)"
+    TEMPLATE_HINTS = {
+        "النموذج الأول (الأصلي المطور)": "💡 التصميم الأساسي المعتمد للاستخدام العام — يناسب أغلب الحالات.",
+        "النموذج الثاني (حجم 14 وحقلين فارغين)": "💡 نفس التصميم الأساسي بخط أكبر (14) وحقلين فارغين إضافيين.",
+        "النموذج الثالث (خط 16، عناوين 12، 4 أشهر)": "💡 خط أكبر (16) مع أربعة أعمدة أشهر إضافية للتوزيع الدوري.",
+        "النموذج الرابع (12 سلة، العدد الكلي)": "💡 مخصص لتوزيع 12 سلة غذائية، معتمداً على العدد الكلي للأفراد.",
+        "النموذج الخامس (ورقة A3، حقول كبيرة، خط Uighur)": "💡 ورقة A3 بحقول كبيرة وخط Uighur — يناسب الطباعة على ورق أكبر.",
+        "النموذج السادس (12 سلة، العدد المستحق)": "💡 نفس توزيع 12 سلة، لكن باعتماد العدد المستحق فقط.",
+        "النموذج السابع (تفصيل المواد الغذائية)": "💡 يعرض تفصيل كل مادة غذائية (سكر، زيت، طحين...) بعمود مستقل.",
+        "النموذج الثامن (8 سلات، العدد المستحق)": "💡 توزيع 8 سلال غذائية باعتماد العدد المستحق.",
+        "النموذج التاسع (توزيع مواد غذائية، بدون رقم بطاقة)": "💡 لملفات توزيع المواد الغذائية التي لا تحتوي رقم بطاقة أصلاً.",
+        "النموذج العاشر (ت، الاسم الرباعي، العدد المستحق، حقل فارغ)": "💡 تصميم مبسّط: تسلسل، الاسم الرباعي، العدد المستحق، وحقل فارغ.",
+        "النموذج الحادي عشر (ثيم أخضر: ت، الاسم، المستحق، حقل فارغ)": "💡 نفس التصميم المبسّط بثيم أخضر مميّز.",
+        "النموذج الثاني عشر (ت، اسم رب الأسرة، المستحق، حقل فارغ)": "💡 تصميم مبسّط مطابق لسجل التوزيع الورقي التقليدي.",
+    }
+    st.caption(TEMPLATE_HINTS.get(template_choice, ""))
 
-sort_choice = st.radio(
-    "🔤 ترتيب بيانات الجدول:",
-    ["ترتيب أبجدي بحسب الاسم", SORT_ALPHA_WITH_OLD_CARD, SORT_CARD_ONLY, SORT_KEEP_ORIGINAL],
-    index=0,
-    horizontal=True
-)
-sort_by_card_only = (sort_choice == SORT_CARD_ONLY)
-sort_alphabetically = (sort_choice != SORT_KEEP_ORIGINAL) and not sort_by_card_only
-sort_by_card_within_group = (sort_choice == SORT_ALPHA_WITH_OLD_CARD)
+    st.markdown("**📋 ماذا تريد أن يظهر داخل الملف؟** (اختر عموداً واحداً أو أكثر — تنطبق على كل النماذج الـ11)")
+    tot_col1, tot_col2, tot_col3 = st.columns(3)
+    with tot_col1:
+        show_kuli = st.checkbox("الكلي", value=True, key="show_kuli_chk")
+    with tot_col2:
+        show_mustahaq = st.checkbox("المستحق", value=True, key="show_mustahaq_chk")
+    with tot_col3:
+        show_mahjoob = st.checkbox("المحجوب", value=True, key="show_mahjoob_chk")
 
-show_children_filter = st.checkbox(
-    "👶 فلتر الأطفال: إضافة عمود \"أطفال\" عند وجود فرق بين الكلي والمستحق + المحجوب "
-    "(يعمل فقط في النماذج: الأول، الثاني، الثالث، السابع — لأنها الوحيدة التي تحتوي أعمدة الكلي/مستحق/محجوب منفصلة)",
-    value=False
-)
+    visible_totals = {c for c, v in [("كلي", show_kuli), ("مستحق", show_mustahaq), ("محجوب", show_mahjoob)] if v}
+    if not visible_totals:
+        st.warning("⚠️ يجب اختيار عمود واحد على الأقل من (الكلي/المستحق/المحجوب) — سيتم عرض الكل تلقائياً.")
+        visible_totals = {"كلي", "مستحق", "محجوب"}
 
-swap_old_new_cards = st.checkbox(
-    "🔀 تبديل رقم البطاقة القديم والحديث (فعّل هذا الخيار فقط إذا تأكدت أن الملف المصدر "
-    "يضع رقم البطاقة القديم تحت عنوان \"الحديث/الجديدة\" والحديث تحت عنوان \"القديم\" أو بلا تسمية — أي معكوسان. "
-    "لا يؤثر على أي أسرة لا تملك إلا رقماً واحداً مسجّلاً)",
-    value=False
-)
+with st.expander("⚙️ خيارات إضافية (نادرة الاستخدام)"):
+    show_children_filter = st.checkbox(
+        "👶 فلتر الأطفال",
+        value=False,
+        help="إضافة عمود \"أطفال\" عند وجود فرق بين الكلي والمستحق + المحجوب. "
+             "يعمل فقط في النماذج: الأول، الثاني، الثالث، السابع — لأنها الوحيدة التي تحتوي أعمدة الكلي/مستحق/محجوب منفصلة."
+    )
 
-st.markdown("**📋 ماذا تريد أن يظهر داخل الملف؟** (اختر عموداً واحداً أو أكثر — تنطبق على كل النماذج الـ11)")
-tot_col1, tot_col2, tot_col3 = st.columns(3)
-with tot_col1:
-    show_kuli = st.checkbox("الكلي", value=True, key="show_kuli_chk")
-with tot_col2:
-    show_mustahaq = st.checkbox("المستحق", value=True, key="show_mustahaq_chk")
-with tot_col3:
-    show_mahjoob = st.checkbox("المحجوب", value=True, key="show_mahjoob_chk")
-
-visible_totals = {c for c, v in [("كلي", show_kuli), ("مستحق", show_mustahaq), ("محجوب", show_mahjoob)] if v}
-if not visible_totals:
-    st.warning("⚠️ يجب اختيار عمود واحد على الأقل من (الكلي/المستحق/المحجوب) — سيتم عرض الكل تلقائياً.")
-    visible_totals = {"كلي", "مستحق", "محجوب"}
+    swap_old_new_cards = st.checkbox(
+        "🔀 تبديل رقم البطاقة القديم والحديث",
+        value=False,
+        help="فعّل هذا الخيار فقط إذا تأكدت أن الملف المصدر يضع رقم البطاقة القديم تحت عنوان "
+             "\"الحديث/الجديدة\" والحديث تحت عنوان \"القديم\" أو بلا تسمية — أي معكوسان. "
+             "لا يؤثر على أي أسرة لا تملك إلا رقماً واحداً مسجّلاً."
+    )
 
 st.markdown("<br>", unsafe_allow_html=True)
 
