@@ -2692,7 +2692,7 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
                     # لون الحرف نفسه بدل تعبئة صلبة.
                     lr, lg, lb = int(current_letter_color[0:2], 16), int(current_letter_color[2:4], 16), int(current_letter_color[4:6], 16)
                     rows_html += (
-                        f'<tr><td colspan="{len(headers)}" style="border: none; background: transparent; padding: 2px 0 2px 0; text-align: center;">'
+                        f'<tr><td colspan="{len(headers)}" style="border: none; background: transparent; padding: 8px 0 9px 0; text-align: center;">'
                         f'<span class="lux-letter-pill" style="background: linear-gradient(180deg, rgba(255,255,255,0.85), rgba({lr},{lg},{lb},0.32)); color: #{base_color};">'
                         f'{letter}</span></td></tr>'
                     )
@@ -2870,7 +2870,7 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
             else:
                 card_sub = str(row["رقم البطاقة"])
             name_html = (
-                '<div style="display:flex; flex-direction:row-reverse; align-items:center; gap:8px;">'
+                '<div style="display:flex; flex-direction:row-reverse; align-items:center; gap:10px;">'
                 '<span class="lux-sq lux-sq-gold"></span>'
                 '<div>'
                 f'<div class="lux-name" style="{"color:#B02E26;" if is_eligible_zero else ""}">{display_name}</div>'
@@ -3353,19 +3353,19 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
             table.theme-luxury th {{
                 background-color: #FFFFFF;
                 color: #14243B;
-                font-size: 11pt;
+                font-size: 12pt;
                 font-weight: 800;
                 border: none;
                 border-bottom: 3px solid #14243B;
-                padding-top: 3px;
-                padding-bottom: 3px;
+                padding-top: 8px;
+                padding-bottom: 8px;
             }}
             table.theme-luxury td {{
                 border: none;
                 border-bottom: 1px solid #E7EBF2;
-                padding-top: 0.5px;
-                padding-bottom: 0.5px;
-                line-height: 1.0;
+                padding-top: 7px;
+                padding-bottom: 7px;
+                line-height: 1.25;
             }}
             table.theme-luxury tbody tr:nth-child(even) td {{
                 background-color: #FAFBFD;
@@ -3376,17 +3376,17 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
                 color: #C7D2E0;
             }}
             table.theme-luxury .lux-name {{
-                font-size: 11.5pt;
+                font-size: 12.5pt;
                 font-weight: 800;
                 color: #14243B;
-                line-height: 1.0;
+                line-height: 1.3;
             }}
             table.theme-luxury .lux-sub {{
-                font-size: 9.5pt;
+                font-size: 10pt;
                 font-weight: 600;
                 color: #8A96A8;
-                line-height: 1.0;
-                margin-top: 0px;
+                line-height: 1.3;
+                margin-top: 3px;
             }}
             table.theme-luxury .lux-sq {{
                 display: inline-block;
@@ -3414,25 +3414,25 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
             }}
             table.theme-luxury .lux-chip {{
                 display: inline-block;
-                min-width: 24px;
-                padding: 0px 9px;
+                min-width: 28px;
+                padding: 4px 13px;
                 border-radius: 20px;
                 font-weight: 800;
-                font-size: 10.5pt;
-                line-height: 1.35;
+                font-size: 11.5pt;
+                line-height: 1.4;
             }}
             table.theme-luxury .lux-chip-navy {{ background-color: #EEF3FA; color: #1B3A63; }}
             table.theme-luxury .lux-chip-green {{ background-color: #E9F7EF; color: #1E7E43; }}
             table.theme-luxury .lux-chip-red {{ background-color: #FBEAE8; color: #B02E26; }}
             table.theme-luxury .lux-letter-pill {{
                 display: inline-block;
-                padding: 0px 20px;
+                padding: 5px 28px;
                 border-radius: 999px;
                 border: 1px solid rgba(255, 255, 255, 0.9);
                 box-shadow: 0 3px 8px rgba(20, 36, 59, 0.14);
                 font-weight: 800;
-                font-size: 11pt;
-                line-height: 1.2;
+                font-size: 12.5pt;
+                line-height: 1.4;
             }}
             .green-checkbox {{
                 display: inline-block;
