@@ -413,6 +413,14 @@ def setup_document_layout(doc, filename_base, is_a3=False):
 # محرك استخراج البيانات اعتماداً على عناوين الأعمدة الفعلية (تقارير منسّقة)
 # -----------------------------------------------------------------------------
 _ARABIC_DIACRITICS_RE = re.compile(r'[ؐ-ًؚ-ٰٟۖ-ۜ۟-۪ۨ-ۭ]')
+_EASTERN_ARABIC_DIGITS = str.maketrans("0123456789", "٠١٢٣٤٥٦٧٨٩")
+
+def _to_eastern_arabic_digits(value):
+    """يحوّل الأرقام اللاتينية (0-9) إلى أرقام هندية-عربية (٠-٩) — يُستخدم فقط
+    برقم التسلسل الكبير الباهت بالنموذج الثالث عشر، لا بأي رقم آخر بالتطبيق."""
+    return str(value).translate(_EASTERN_ARABIC_DIGITS)
+
+
 
 def _strip_diacritics_and_unify_hamza(text):
     """يزيل التشكيل ويوحّد أشكال الهمزة/الألف، مع الحفاظ على المسافات (بعكس
@@ -2643,7 +2651,9 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
     elif template_choice == "النموذج الثالث عشر (تصميم فاخر عصري)":
         # بلا عمود مستقل لرقم البطاقة: يُدمَج كسطر فرعي صغير تحت الاسم (انظر
         # فرع القيم أدناه)، فالترويسة تبقى ثابتة بصرف النظر عن card_choice.
-        headers = ["ت", "اسم رب الأسرة", "الكلي", "مستحق", "محجوب", "ملاحظات"]
+        # العمود الفارغ العنوان (بين الاسم والكلي) مخصّص لمربع زخرفي أبيض
+        # (طلب صريح)، لا بيانات فيه.
+        headers = ["ت", "اسم رب الأسرة", "", "الكلي", "مستحق", "محجوب", "ملاحظات"]
         page_size = "A4"
         page_orientation = "portrait"
     else:
@@ -2682,7 +2692,7 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
                     # لون الحرف نفسه بدل تعبئة صلبة.
                     lr, lg, lb = int(current_letter_color[0:2], 16), int(current_letter_color[2:4], 16), int(current_letter_color[4:6], 16)
                     rows_html += (
-                        f'<tr><td colspan="{len(headers)}" style="border: none; background: transparent; padding: 10px 0 12px 0; text-align: center;">'
+                        f'<tr><td colspan="{len(headers)}" style="border: none; background: transparent; padding: 2px 0 2px 0; text-align: center;">'
                         f'<span class="lux-letter-pill" style="background: linear-gradient(180deg, rgba(255,255,255,0.85), rgba({lr},{lg},{lb},0.32)); color: #{base_color};">'
                         f'{letter}</span></td></tr>'
                     )
@@ -2845,30 +2855,40 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
                 ("x" if is_eligible_zero else "", "")
             ]
         elif template_choice == "النموذج الثالث عشر (تصميم فاخر عصري)":
-            # لا شبكة، لا خلايا ملوّنة تقليدية: رقم تسلسل كبير باهت كزخرفة،
-            # رقم البطاقة كسطر فرعي صغير تحت الاسم بدل عمود مستقل، وثلاثية
-            # الكلي/مستحق/محجوب كشرائح مستديرة صغيرة. صف "مستحق=صفر" يُميَّز
-            # بشريط أحمر جانبي عريض + تظليل خفيف + أيقونة تحذير، لا تظليل
-            # كامل صريح كبقية القوالب — انظر التعليق أعلى صنف CSS المقابل.
+            # لا شبكة، لا خلايا ملوّنة تقليدية: رقم تسلسل كبير باهت (بأرقام
+            # هندية-عربية) كزخرفة، مربع ذهبي أمام كل اسم ومربع أبيض في عمود
+            # فارغ مخصّص بينه وبين الكلي، رقم البطاقة كسطر فرعي تحت الاسم،
+            # وثلاثية الكلي/مستحق/محجوب كشرائح مستديرة متقاربة. عمود الملاحظات
+            # يحمل مربعاً أكبر من مربع الاسم (فارغاً عادةً، أو بتحذير أحمر
+            # وأيقونة عند "مستحق=صفر") — لا تظليل كامل صريح كبقية القوالب.
             row_bg = "background-color: #FDF1EF;" if is_eligible_zero else ""
             accent_color = "B02E26" if is_eligible_zero else current_letter_color
-            ter_html = f'<span class="lux-ter">{row["ت"]}</span>'
+            ter_html = f'<span class="lux-ter">{_to_eastern_arabic_digits(row["ت"])}</span>'
             ter_style = f"border-right: 6px solid #{accent_color};"
             if is_combined:
                 card_sub = f'القديم {row["رقم البطاقة القديم"]} · الحديث {row["رقم البطاقة الحديث"]}'
             else:
                 card_sub = str(row["رقم البطاقة"])
             name_html = (
+                '<div style="display:flex; flex-direction:row-reverse; align-items:center; gap:8px;">'
+                '<span class="lux-sq lux-sq-gold"></span>'
+                '<div>'
                 f'<div class="lux-name" style="{"color:#B02E26;" if is_eligible_zero else ""}">{display_name}</div>'
                 f'<div class="lux-sub">{card_sub}</div>'
+                '</div></div>'
+            )
+            notes_val = (
+                '<span class="lux-sq lux-sq-notes lux-sq-alert">⚠</span>' if is_eligible_zero
+                else '<span class="lux-sq lux-sq-notes"></span>'
             )
             vals = [
                 (ter_html, ter_style),
                 (name_html, "text-align: right;"),
+                ('<span class="lux-sq lux-sq-white"></span>', ""),
                 (f'<span class="lux-chip lux-chip-navy">{row["الكلي"]}</span>', ""),
                 (f'<span class="lux-chip lux-chip-green">{row["مستحق"]}</span>', ""),
                 (f'<span class="lux-chip lux-chip-red">{row["محجوب"]}</span>', ""),
-                ('⚠ محجوب' if is_eligible_zero else "", "color: #B02E26; font-weight: 800; font-size: 11pt;" if is_eligible_zero else "")
+                (notes_val, "")
             ]
         else:
             vals = [
@@ -2969,7 +2989,13 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
         table_class = "theme-green"
     if is_luxury_theme:
         table_class = "theme-luxury"
-    if use_compact_columns:
+        # عرض أعمدة مُخصَّص يدوياً بمعزل تام عن المحرك العام أدناه (طلب صريح:
+        # الكلي/مستحق/محجوب متقاربة قليلة العرض، عمود فارغ صغير بينها وبين
+        # الاسم لمربع زخرفي، وملاحظات أوسع لمربعها الأكبر).
+        luxury_pct = {"ت": 7.0, "اسم رب الأسرة": 32.0, "": 6.0, "الكلي": 8.5, "مستحق": 8.5, "محجوب": 8.5, "اطفال": 6.0, "ملاحظات": 23.5}
+        resolved_widths = [luxury_pct.get(h, 8.0) for h in headers]
+        colgroup_html = "<colgroup>" + "".join(f'<col style="width:{w:.2f}%">' for w in resolved_widths) + "</colgroup>"
+    elif use_compact_columns:
         table_class = (table_class + " compact").strip()
         critical = [_critical_pct(h) for h in headers]
         critical_total = sum(p for p in critical if p is not None)
@@ -3327,57 +3353,86 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
             table.theme-luxury th {{
                 background-color: #FFFFFF;
                 color: #14243B;
-                font-size: 12.5pt;
+                font-size: 11pt;
                 font-weight: 800;
                 border: none;
                 border-bottom: 3px solid #14243B;
-                padding-top: 10px;
-                padding-bottom: 10px;
+                padding-top: 3px;
+                padding-bottom: 3px;
             }}
             table.theme-luxury td {{
                 border: none;
                 border-bottom: 1px solid #E7EBF2;
-                padding-top: 9px;
-                padding-bottom: 9px;
+                padding-top: 0.5px;
+                padding-bottom: 0.5px;
+                line-height: 1.0;
             }}
             table.theme-luxury tbody tr:nth-child(even) td {{
                 background-color: #FAFBFD;
             }}
             table.theme-luxury .lux-ter {{
-                font-size: 19pt;
+                font-size: 16pt;
                 font-weight: 800;
                 color: #C7D2E0;
             }}
             table.theme-luxury .lux-name {{
-                font-size: 13.5pt;
+                font-size: 11.5pt;
                 font-weight: 800;
                 color: #14243B;
+                line-height: 1.0;
             }}
             table.theme-luxury .lux-sub {{
-                font-size: 9pt;
+                font-size: 9.5pt;
                 font-weight: 600;
                 color: #8A96A8;
-                margin-top: 2px;
+                line-height: 1.0;
+                margin-top: 0px;
+            }}
+            table.theme-luxury .lux-sq {{
+                display: inline-block;
+                width: 14px;
+                height: 14px;
+                border-radius: 0;
+                background-color: #FFFFFF;
+                flex-shrink: 0;
+            }}
+            table.theme-luxury .lux-sq-gold {{ border: 1.5px solid #C9A227; }}
+            table.theme-luxury .lux-sq-white {{ border: 1.5px solid #C7D2E0; }}
+            table.theme-luxury .lux-sq-notes {{
+                width: 19px;
+                height: 19px;
+                border: 1.5px solid #C7D2E0;
+            }}
+            table.theme-luxury .lux-sq-alert {{
+                border: 1.5px solid #B02E26;
+                background-color: #FDF1EF;
+                color: #B02E26;
+                font-weight: 800;
+                font-size: 10pt;
+                text-align: center;
+                line-height: 17px;
             }}
             table.theme-luxury .lux-chip {{
                 display: inline-block;
-                min-width: 30px;
-                padding: 4px 12px;
+                min-width: 24px;
+                padding: 0px 9px;
                 border-radius: 20px;
                 font-weight: 800;
-                font-size: 12pt;
+                font-size: 10.5pt;
+                line-height: 1.35;
             }}
             table.theme-luxury .lux-chip-navy {{ background-color: #EEF3FA; color: #1B3A63; }}
             table.theme-luxury .lux-chip-green {{ background-color: #E9F7EF; color: #1E7E43; }}
             table.theme-luxury .lux-chip-red {{ background-color: #FBEAE8; color: #B02E26; }}
             table.theme-luxury .lux-letter-pill {{
                 display: inline-block;
-                padding: 6px 30px;
+                padding: 0px 20px;
                 border-radius: 999px;
                 border: 1px solid rgba(255, 255, 255, 0.9);
                 box-shadow: 0 3px 8px rgba(20, 36, 59, 0.14);
                 font-weight: 800;
-                font-size: 13pt;
+                font-size: 11pt;
+                line-height: 1.2;
             }}
             .green-checkbox {{
                 display: inline-block;
