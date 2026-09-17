@@ -2503,6 +2503,9 @@ def get_pdf_font_face_css():
     extrabold = _get_embedded_font_base64("Tajawal-ExtraBold.ttf")
     ruqaa_regular = _get_embedded_font_base64("ArefRuqaa-Regular.ttf")
     ruqaa_bold = _get_embedded_font_base64("ArefRuqaa-Bold.ttf")
+    messiri_regular = _get_embedded_font_base64("ElMessiri-Regular.ttf")
+    messiri_semibold = _get_embedded_font_base64("ElMessiri-SemiBold.ttf")
+    messiri_bold = _get_embedded_font_base64("ElMessiri-Bold.ttf")
     if not (regular and bold and extrabold):
         return ""
     ruqaa_css = ""
@@ -2521,6 +2524,31 @@ def get_pdf_font_face_css():
                 font-weight: 700;
                 font-style: normal;
                 src: url(data:font/ttf;base64,{ruqaa_bold}) format('truetype');
+            }}
+        """
+    messiri_css = ""
+    if messiri_regular and messiri_semibold and messiri_bold:
+        # خط El Messiri: خط عربي عصري بحروف مميّزة (تباين واضح بين الرفيع
+        # والعريض)، يُستخدم فقط بالنموذج الثالث عشر (التصميم الجريء) بدل
+        # Tajawal المستخدم بكل القوالب الأخرى — طلب صريح لخط "مختلف وأجمل".
+        messiri_css = f"""
+            @font-face {{
+                font-family: 'El Messiri';
+                font-weight: 400;
+                font-style: normal;
+                src: url(data:font/ttf;base64,{messiri_regular}) format('truetype');
+            }}
+            @font-face {{
+                font-family: 'El Messiri';
+                font-weight: 600;
+                font-style: normal;
+                src: url(data:font/ttf;base64,{messiri_semibold}) format('truetype');
+            }}
+            @font-face {{
+                font-family: 'El Messiri';
+                font-weight: 700;
+                font-style: normal;
+                src: url(data:font/ttf;base64,{messiri_bold}) format('truetype');
             }}
         """
     return f"""
@@ -2543,6 +2571,7 @@ def get_pdf_font_face_css():
                 src: url(data:font/ttf;base64,{extrabold}) format('truetype');
             }}
             {ruqaa_css}
+            {messiri_css}
     """
 
 # -----------------------------------------------------------------------------
@@ -2646,12 +2675,24 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
             if letter != prev_letter:
                 current_letter_color = get_letter_banner_color(letter)
                 base_color = get_letter_base_color(letter)
-                rows_html += (
-                    f'<tr><td colspan="{len(headers)}" '
-                    f'style="background-color: #{current_letter_color}; color: #{base_color}; '
-                    f'font-weight: bold; font-size: 14pt; text-align: center; padding: 6px 4px;">'
-                    f'{letter}</td></tr>'
-                )
+                if is_luxury_theme:
+                    # طلب صريح: صف الحرف بالنموذج الفاخر يُفصَل بصرياً عن
+                    # الجدول (بدل شريط كامل العرض) — كبسولة "زجاجية" مستديرة
+                    # الطرفين تطفو بمسافة صغيرة أعلاه وأسفله، بتدرّج شفاف من
+                    # لون الحرف نفسه بدل تعبئة صلبة.
+                    lr, lg, lb = int(current_letter_color[0:2], 16), int(current_letter_color[2:4], 16), int(current_letter_color[4:6], 16)
+                    rows_html += (
+                        f'<tr><td colspan="{len(headers)}" style="border: none; background: transparent; padding: 10px 0 12px 0; text-align: center;">'
+                        f'<span class="lux-letter-pill" style="background: linear-gradient(180deg, rgba(255,255,255,0.85), rgba({lr},{lg},{lb},0.32)); color: #{base_color};">'
+                        f'{letter}</span></td></tr>'
+                    )
+                else:
+                    rows_html += (
+                        f'<tr><td colspan="{len(headers)}" '
+                        f'style="background-color: #{current_letter_color}; color: #{base_color}; '
+                        f'font-weight: bold; font-size: 14pt; text-align: center; padding: 6px 4px;">'
+                        f'{letter}</td></tr>'
+                    )
                 prev_letter = letter
 
         is_eligible_zero = int(row["مستحق"]) == 0
@@ -3278,9 +3319,10 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
                تقليدية. صف "مستحق=صفر" يُبرَز بشريط أحمر جانبي عريض + تظليل
                خفيف + أيقونة تحذير، بدل التظليل الكامل الصريح المستخدم بكل
                القوالب الأخرى.  */
-            table.theme-luxury {{
+            table.theme-luxury, table.theme-luxury th, table.theme-luxury td {{
                 border-collapse: separate;
                 border-spacing: 0;
+                font-family: 'El Messiri', 'Tajawal', {pdf_font_stack};
             }}
             table.theme-luxury th {{
                 background-color: #FFFFFF;
@@ -3328,6 +3370,15 @@ def _build_report_html_doc(df, filename_base, card_choice, template_choice, sort
             table.theme-luxury .lux-chip-navy {{ background-color: #EEF3FA; color: #1B3A63; }}
             table.theme-luxury .lux-chip-green {{ background-color: #E9F7EF; color: #1E7E43; }}
             table.theme-luxury .lux-chip-red {{ background-color: #FBEAE8; color: #B02E26; }}
+            table.theme-luxury .lux-letter-pill {{
+                display: inline-block;
+                padding: 6px 30px;
+                border-radius: 999px;
+                border: 1px solid rgba(255, 255, 255, 0.9);
+                box-shadow: 0 3px 8px rgba(20, 36, 59, 0.14);
+                font-weight: 800;
+                font-size: 13pt;
+            }}
             .green-checkbox {{
                 display: inline-block;
                 width: 43px;
